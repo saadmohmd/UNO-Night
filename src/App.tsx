@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
-import { AlertCircle, X } from 'lucide-react'
+import { AlertCircle, History, TriangleAlert, X } from 'lucide-react'
 import { HomeScreen } from '@/screens/HomeScreen'
 import { SetupScreen, type SetupDetails } from '@/screens/SetupScreen'
 import { DashboardScreen } from '@/screens/DashboardScreen'
@@ -12,21 +12,43 @@ import { FinalScreen } from '@/screens/FinalScreen'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { createInitialGameState, gameStoreReducer } from '@/game/reducer'
 import type { GameAction, GameStore } from '@/game/reducer'
+import { clearSavedGame, loadSavedGame, saveGame, type LoadResult } from '@/game/persistence'
 import { resolveScreen, type Screen } from '@/game/selectors'
 import { useBeforeUnload } from '@/hooks/useBeforeUnload'
 import { createId } from '@/lib/id'
+import { cn, formatTime } from '@/lib/utils'
 
-const initialState: GameStore = { game: createInitialGameState(), error: null }
+/** Reads this device's saved game once, before the first render. */
+function restoreStore(saved: LoadResult): GameStore {
+  return {
+    game: saved.status === 'restored' ? saved.game : createInitialGameState(),
+    error: null,
+  }
+}
+
+const SAVE_BLOCKED = 'This browser is blocking local storage, so this game cannot be saved.'
 
 export default function App() {
-  const [store, rawDispatch] = useReducer(gameStoreReducer, initialState)
+  const [boot] = useState<LoadResult>(() => loadSavedGame())
+  const [store, rawDispatch] = useReducer(gameStoreReducer, boot, restoreStore)
   const [route, setRoute] = useState<Screen>('home')
   const [confirm, setConfirm] = useState<'end-game' | 'reset' | null>(null)
+  const [restoredAt, setRestoredAt] = useState<number | null>(
+    boot.status === 'restored' ? boot.savedAt : null,
+  )
+  const [restoreError, setRestoreError] = useState<string | null>(
+    boot.status === 'discarded' ? boot.reason : null,
+  )
+  const [saveError, setSaveError] = useState<string | null>(
+    boot.status === 'unavailable' ? SAVE_BLOCKED : null,
+  )
   const { game, error } = store
   const screen = resolveScreen(game, route)
   const isActive = game.phase === 'active'
 
-  useBeforeUnload(isActive)
+  // The saved copy is now the safety net, so only warn on leaving when saving
+  // is actually unavailable — otherwise the prompt would be a lie.
+  useBeforeUnload(isActive && saveError !== null)
 
   const dispatch = useCallback(
     (action: GameAction) => {
@@ -40,6 +62,29 @@ export default function App() {
     const timer = window.setTimeout(() => rawDispatch({ type: 'DISMISS_ERROR' }), 6000)
     return () => window.clearTimeout(timer)
   }, [error, rawDispatch])
+
+  // A rejected save is deleted once, after mount — never while reading it.
+  useEffect(() => {
+    if (boot.status === 'discarded') clearSavedGame()
+  }, [boot.status])
+
+  // Write every state change to this device. Resetting clears the slot.
+  useEffect(() => {
+    const result = saveGame(game)
+    setSaveError(result.ok ? null : result.error)
+  }, [game])
+
+  useEffect(() => {
+    if (restoredAt === null) return
+    const timer = window.setTimeout(() => setRestoredAt(null), 9000)
+    return () => window.clearTimeout(timer)
+  }, [restoredAt])
+
+  useEffect(() => {
+    if (!restoreError) return
+    const timer = window.setTimeout(() => setRestoreError(null), 14000)
+    return () => window.clearTimeout(timer)
+  }, [restoreError])
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' })
@@ -124,9 +169,12 @@ export default function App() {
     setRoute('final')
   }
 
+  /** Discards the game in memory *and* the saved copy on this device. */
   function resetGame() {
     setConfirm(null)
+    clearSavedGame()
     dispatch({ type: 'RESET_GAME' })
+    setRestoredAt(null)
     setRoute('home')
   }
 
@@ -143,6 +191,33 @@ export default function App() {
   function declareChampion(playerId: string) {
     dispatch({ type: 'DECLARE_CHAMPION', playerId, at: Date.now() })
   }
+
+  const notice =
+    saveError !== null
+      ? {
+          tone: 'danger' as const,
+          icon: AlertCircle,
+          title: 'Saving is off',
+          body: saveError,
+          discard: false,
+        }
+      : restoreError !== null
+        ? {
+            tone: 'warning' as const,
+            icon: TriangleAlert,
+            title: 'Saved game not restored',
+            body: restoreError,
+            discard: false,
+          }
+        : restoredAt !== null
+          ? {
+              tone: 'neutral' as const,
+              icon: History,
+              title: 'Saved game restored',
+              body: `Picking up where you left off — saved at ${formatTime(restoredAt)}.`,
+              discard: true,
+            }
+          : null
 
   const gameChrome = {
     game,
@@ -231,13 +306,60 @@ export default function App() {
         )}
       </div>
 
-      {error && (
-        <div
-          className="fixed inset-x-0 bottom-24 z-50 mx-auto w-full max-w-md px-4"
-          role="alert"
-          aria-live="assertive"
-        >
-          <div className="flex items-start gap-3 rounded-xl border border-uno-red/30 bg-[#1b0e13] px-4 py-3 shadow-2xl">
+      <div className="pointer-events-none fixed inset-x-0 bottom-24 z-50 mx-auto flex w-full max-w-md flex-col gap-2 px-4">
+        {notice && (
+          <div
+            role={notice.tone === 'neutral' ? 'status' : 'alert'}
+            aria-live="polite"
+            className={cn(
+              'pointer-events-auto flex items-start gap-3 rounded-xl border px-4 py-3 shadow-2xl backdrop-blur',
+              notice.tone === 'danger' && 'border-uno-red/30 bg-[#1b0e13]',
+              notice.tone === 'warning' && 'border-uno-yellow/30 bg-[#1d1708]',
+              notice.tone === 'neutral' && 'border-line bg-bg-soft/95',
+            )}
+          >
+            <notice.icon
+              className={cn(
+                'mt-0.5 size-4 shrink-0',
+                notice.tone === 'danger' && 'text-uno-red',
+                notice.tone === 'warning' && 'text-uno-yellow',
+                notice.tone === 'neutral' && 'text-uno-blue',
+              )}
+            />
+            <div className="flex-1">
+              <p className="text-[13px] leading-snug font-medium text-ink">{notice.title}</p>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-muted">{notice.body}</p>
+              {notice.discard && (
+                <button
+                  type="button"
+                  onClick={() => setConfirm('reset')}
+                  className="mt-1.5 text-[11px] font-semibold text-uno-red underline-offset-2 hover:underline"
+                >
+                  Discard saved game
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setSaveError(null)
+                setRestoreError(null)
+                setRestoredAt(null)
+              }}
+              className="rounded-md p-0.5 text-faint transition-colors hover:text-ink"
+              aria-label="Dismiss save notice"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        )}
+
+        {error && (
+          <div
+            role="alert"
+            aria-live="assertive"
+            className="pointer-events-auto flex items-start gap-3 rounded-xl border border-uno-red/30 bg-[#1b0e13] px-4 py-3 shadow-2xl"
+          >
             <AlertCircle className="mt-0.5 size-4 shrink-0 text-uno-red" />
             <p className="flex-1 text-[13px] leading-relaxed text-ink-soft">{error.message}</p>
             <button
@@ -249,8 +371,8 @@ export default function App() {
               <X className="size-4" />
             </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       <ConfirmDialog
         open={confirm === 'end-game'}
@@ -275,9 +397,10 @@ export default function App() {
       <ConfirmDialog
         open={confirm === 'reset'}
         onOpenChange={(open) => setConfirm(open ? 'reset' : null)}
-        title="Reset this game?"
-        description="The current game will be lost. Every player, score, round and elimination is removed from this device immediately. This cannot be undone."
-        confirmLabel="Reset game"
+        title="Discard this game?"
+        description="This deletes the saved game from this device and clears every player, score, round and elimination. It cannot be undone."
+        confirmLabel="Discard game"
+        cancelLabel="Keep playing"
         tone="danger"
         onConfirm={resetGame}
       />

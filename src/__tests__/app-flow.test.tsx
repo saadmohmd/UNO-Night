@@ -314,16 +314,16 @@ describe('UNO Night app flow', () => {
     expect(screen.getByText(/champion declared by the table/i)).toBeInTheDocument()
   })
 
-  it('confirms before resetting an active game', async () => {
+  it('confirms before discarding an active game', async () => {
     const user = userEvent.setup()
     await startGame(user, { cutoff: '200' })
 
     await user.click(screen.getByRole('button', { name: 'Game menu' }))
-    await user.click(await screen.findByRole('menuitem', { name: /reset game/i }))
+    await user.click(await screen.findByRole('menuitem', { name: /discard game/i }))
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText(/the current game will be lost/i)).toBeInTheDocument()
+    expect(within(dialog).getByText(/deletes the saved game from this device/i)).toBeInTheDocument()
 
-    await user.click(within(dialog).getByRole('button', { name: /^reset game$/i }))
+    await user.click(within(dialog).getByRole('button', { name: /^discard game$/i }))
     expect(
       await screen.findByRole('heading', { name: /track the night/i }),
     ).toBeInTheDocument()

@@ -1,8 +1,9 @@
 import { useEffect } from 'react'
 
 /**
- * Uses the standard beforeunload mechanism while a game is active.
- * Browsers decide whether to show the prompt; this cannot recover a lost session.
+ * Standard beforeunload guard. The app calls it only while a game is active *and*
+ * saving to this device is failing — otherwise the saved copy makes the prompt
+ * meaningless. Browsers decide whether to show it, and it cannot recover anything.
  */
 export function useBeforeUnload(enabled: boolean) {
   useEffect(() => {

@@ -350,7 +350,7 @@ export function SetupScreen({
               : 'Complete the setup to start.'}
           </p>
           <p className="mt-0.5 truncate text-xs font-medium text-ink-soft">
-            {normalizeName(gameName) ? gameName : 'Game session on this device'}
+            {normalizeName(gameName) ? gameName : 'Saved on this device'}
           </p>
         </div>
         <Button type="submit" form="setup-form" size="lg" className="min-w-36">

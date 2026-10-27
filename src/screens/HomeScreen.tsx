@@ -186,8 +186,8 @@ export function HomeScreen({ onNewGame }: { onNewGame: () => void }) {
 
         <footer className="mt-auto pt-12 text-center text-[11px] leading-relaxed text-faint">
           <p>
-            Sessions live in this browser tab only — refreshing or closing clears the
-            scoreboard. No data ever leaves this device.
+            The game is saved in this browser on this device — close the tab, come back
+            and the table is exactly where you left it. No data ever leaves this device.
           </p>
           <p className="mt-2 inline-flex items-center gap-1 text-muted">
             Built for tables that play the real thing

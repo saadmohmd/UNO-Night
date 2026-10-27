@@ -220,9 +220,9 @@ export function FinalScreen({
             <Brand />
           </div>
           <p className="mt-3 text-[11px] leading-relaxed text-muted">
-            This result lives in this browser tab only. Nothing was uploaded and no
-            account was created. Starting a new game or returning home clears the
-            session.
+            This result is saved in this browser on this device. Nothing was uploaded and
+            no account was created. Starting a new game or returning home deletes the
+            saved result.
           </p>
         </div>
       </div>
@@ -315,7 +315,7 @@ export function FinalScreen({
         open={newGameOpen}
         onOpenChange={setNewGameOpen}
         title="Start a new game?"
-        description="This clears the final result, players and round history from this session, then opens game setup."
+        description="This deletes the saved result from this device, then opens game setup for a fresh table."
         confirmLabel="New game"
         tone="danger"
         onConfirm={() => {
@@ -328,7 +328,7 @@ export function FinalScreen({
         open={homeOpen}
         onOpenChange={setHomeOpen}
         title="Return home?"
-        description="This clears the final result, players and round history from this session. Nothing is saved."
+        description="This deletes the saved result from this device. The standings will be gone."
         confirmLabel="Return home"
         tone="danger"
         onConfirm={() => {

@@ -5,7 +5,8 @@ on the table; everyone records the cards left in their hand after each round and
 handles the maths and the knockout cutoff.
 
 - 100% client-side. No backend, no accounts, no database, no network calls after load.
-- Sessions live in memory only. Refreshing, closing the tab or resetting clears everything.
+- The game in progress is saved in this browser on this device, so a refresh, a closed tab
+  or a browser restart picks up exactly where the table left off.
 - React 19 + TypeScript + Vite + Tailwind CSS v4, with shadcn-style primitives built on
   Radix UI and Lucide icons.
 
@@ -35,6 +36,36 @@ from any subdirectory). Host it anywhere that serves files:
 - **Any static host / S3 bucket / nginx** — upload the contents of `dist/`.
 
 No environment variables, server routes or API keys are involved.
+
+## Saving and restoring
+
+The whole game lives in one `localStorage` record on this device.
+
+- **What is saved** — phase, game name, cutoff, player names and count, each player's
+  cumulative score and elimination state, every confirmed round, the open round (winner,
+  card counts, confirmations), tie-break and controller-decision state, the ending, and the
+  timestamps the scoreboard already shows. Nothing else — no emails, no accounts, no
+  analytics, no history archive.
+- **When** — synchronously after every state change (a count, a winner, a confirmed round),
+  so a refresh loses nothing.
+- **On load** — the record is validated field by field before it is used, then the app
+  reopens the screen the game is in: score entry for an open round, the tie-break or
+  controller decision when one is pending, the final standings for a finished game,
+  otherwise the dashboard. A round confirmed just before a refresh reopens on the dashboard
+  with its result in the round log.
+- **When it goes wrong** — unreadable JSON, a payload that is not a real game, scores that
+  are not whole numbers, missing players, unknown player references or a save written by a
+  different version are all rejected. The app clears the record and says so on the home
+  screen instead of restoring something half-broken.
+- **Discarding** — the game menu's *Discard game* entry (or *Discard saved game* on the
+  restored notice) asks for confirmation, then deletes the record from this device. The
+  final screen asks before it replaces or deletes a saved result.
+- **Privacy** — everything stays in this browser. Clearing site data, using a private
+  window or a different browser/device starts fresh.
+
+Storage can be unavailable (private mode, disabled site data, a full quota). The app keeps
+working and shows a "Saving is off" notice; only then does it fall back to the browser's
+leave-warning while a game is active.
 
 ## The game
 
@@ -96,18 +127,23 @@ src/
     rules.ts        scoring, cutoff evaluation, tie detection, standings
     reducer.ts      the game state machine (all mutations validated)
     selectors.ts    screen resolution and derived view data
+    persistence.ts  versioned localStorage save, validation and clearing
     __tests__/      unit tests for every rule above
   components/      design system + game UI pieces
   screens/         Home, Setup, Dashboard, Score Entry, Results,
                    Leaderboard, Tie-break, Decision, Final
-  hooks/           beforeunload guard
-  __tests__/       full user-journey component tests
+  hooks/           beforeunload guard (used only when saving is unavailable)
+  __tests__/       full user-journey and persistence tests
 ```
 
 ## Notes and limits
 
-- The `beforeunload` warning is best-effort: browsers decide whether to show it, and a lost
-  session cannot be recovered because nothing is persisted by design.
+- Saves are per browser profile and per device. Two tabs of the same game are not synced —
+  the last write wins — and clearing site data deletes the saved game.
+- A save from an incompatible version is discarded rather than migrated; the app never runs
+  on data it does not understand.
+- The `beforeunload` warning only arms when saving is unavailable, and it is best-effort:
+  browsers decide whether to show it.
 - Elimination uses the "single knockout" reading of the cutoff rule: only the worst eligible
   player leaves per confirmed round. Ties are surfaced rather than resolved arbitrarily.
 - Two identical names are rejected; names are trimmed but otherwise preserved as typed.

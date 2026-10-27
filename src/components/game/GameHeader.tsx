@@ -2,7 +2,7 @@ import {
   Flag,
   LayoutDashboard,
   MoreVertical,
-  RotateCcw,
+  Trash2,
   Trophy,
 } from 'lucide-react'
 import { AppHeader } from '@/components/AppHeader'
@@ -52,8 +52,11 @@ export function GameHeader({
               <MoreVertical className="size-5" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>{game.config?.name || 'This game'}</DropdownMenuLabel>
+            <p className="px-2 pb-1.5 text-[10px] leading-relaxed text-faint">
+              Saved automatically on this device
+            </p>
             <DropdownMenuItem onSelect={onDashboard}>
               <LayoutDashboard className="size-4" /> Dashboard
             </DropdownMenuItem>
@@ -68,7 +71,7 @@ export function GameHeader({
               <Flag className="size-4" /> End game
             </DropdownMenuItem>
             <DropdownMenuItem destructive onSelect={onReset}>
-              <RotateCcw className="size-4" /> Reset game
+              <Trash2 className="size-4" /> Discard game
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

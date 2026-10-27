@@ -251,7 +251,8 @@ export function DashboardScreen({
 
         <p className="mt-8 flex items-center gap-1.5 text-[11px] leading-relaxed text-faint">
           <ListOrdered className="size-3.5" />
-          Session only · resetting or refreshing clears every score on this device. The browser's leave warning is best-effort and cannot recover a lost session.
+          Saved automatically in this browser on this device · refreshing keeps the game,
+          discarding deletes it. Nothing is uploaded.
         </p>
       </div>
 

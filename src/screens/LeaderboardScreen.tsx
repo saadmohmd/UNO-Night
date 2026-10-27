@@ -210,8 +210,8 @@ export function LeaderboardScreen({
         </Tabs>
 
         <p className="mt-6 text-[11px] leading-relaxed text-faint">
-          History is kept in memory for this session only. Refreshing or resetting
-          clears every round.
+          Round history is saved in this browser on this device. Discarding the game
+          deletes it.
         </p>
       </div>
     </ScreenShell>
