@@ -12,10 +12,9 @@ async function startGame(
   options: {
     names?: string[]
     cutoff?: string
-    mode?: 'manual' | 'automatic'
   } = {},
 ) {
-  const { names = ['Ana', 'Ben', 'Cara'], cutoff = '200', mode = 'automatic' } = options
+  const { names = ['Ana', 'Ben', 'Cara'], cutoff = '200' } = options
   render(<App />)
   await user.click(screen.getByRole('button', { name: /new game/i }))
   await screen.findByRole('heading', { name: /set up the table/i })
@@ -29,9 +28,6 @@ async function startGame(
   const cutoffInput = screen.getByLabelText(/score cutoff/i)
   await user.clear(cutoffInput)
   await user.type(cutoffInput, cutoff)
-  if (mode === 'manual') {
-    await user.click(screen.getByRole('radio', { name: /manual approval/i }))
-  }
   await user.click(screen.getByRole('button', { name: /start game/i }))
   await screen.findByRole('heading', { name: /table.*set/i })
 }
@@ -57,13 +53,11 @@ async function confirmOpenHand(
   await user.click(screen.getByRole('button', { name: /confirm hand/i }))
 }
 
-async function submitAndFinalize(user: User, submitLabel: RegExp = /submit scores/i) {
+/** Opens the review sheet and confirms the round in one step. */
+async function reviewAndConfirm(user: User) {
+  await user.click(screen.getByRole('button', { name: 'Review' }))
   const review = await screen.findByRole('dialog')
-  await user.click(within(review).getByRole('button', { name: submitLabel }))
-  await screen.findByRole('heading', { name: /scores accepted/i })
-  await user.click(screen.getByRole('button', { name: /finalize round/i }))
-  const confirm = await screen.findByRole('dialog')
-  await user.click(within(confirm).getByRole('button', { name: /finalize round/i }))
+  await user.click(within(review).getByRole('button', { name: /confirm round/i }))
 }
 
 describe('UNO Night app flow', () => {
@@ -76,6 +70,10 @@ describe('UNO Night app flow', () => {
 
     await user.click(screen.getByRole('button', { name: /new game/i }))
     await screen.findByRole('heading', { name: /set up the table/i })
+
+    // Score submission / approval was removed; setup only configures the table.
+    expect(screen.queryByText(/score submission/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /start game/i }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/things need attention/i)
@@ -107,7 +105,7 @@ describe('UNO Night app flow', () => {
     expect(screen.getByText('Ana')).toBeInTheDocument()
   })
 
-  it('records an automatic round with a zero-penalty winner and updates the leaderboard', async () => {
+  it('records a round with a zero-penalty winner and updates the leaderboard', async () => {
     const user = userEvent.setup()
     await startGame(user, { cutoff: '200' })
     await beginRound(user)
@@ -122,8 +120,11 @@ describe('UNO Night app flow', () => {
     expect(within(dialog).getByRole('heading', { name: /review round 1/i })).toBeInTheDocument()
     expect(within(dialog).getByText('+80')).toBeInTheDocument()
     expect(within(dialog).getByText(/winner — penalty locked at 0/i)).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(/confirming is final — the round cannot be edited afterwards/i),
+    ).toBeInTheDocument()
 
-    await submitAndFinalize(user)
+    await user.click(within(dialog).getByRole('button', { name: /confirm round/i }))
 
     expect(
       await screen.findByRole('heading', { name: /ana takes the round/i }),
@@ -138,45 +139,28 @@ describe('UNO Night app flow', () => {
     expect(within(benRow as HTMLElement).getByText(/R1 \+80/i)).toBeInTheDocument()
   })
 
-  it('supports manual approval, rejection and resubmission', async () => {
+  it('confirms the round directly and applies the scores immediately', async () => {
     const user = userEvent.setup()
-    await startGame(user, { mode: 'manual' })
+    await startGame(user)
     await beginRound(user)
     await selectWinner(user, 'Ana')
     await confirmOpenHand(user)
     await confirmOpenHand(user, { label: 'Skip count for Ben', value: '1' })
     await confirmOpenHand(user)
 
-    await user.click(screen.getByRole('button', { name: 'Review' }))
-    const review = await screen.findByRole('dialog')
-    await user.click(within(review).getByRole('button', { name: /submit for approval/i }))
+    await reviewAndConfirm(user)
 
-    expect(await screen.findByRole('heading', { name: /scores submitted/i })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /^reject$/i }))
-    const rejectDialog = await screen.findByRole('dialog')
-    await user.type(
-      within(rejectDialog).getByRole('textbox', { name: /reason/i }),
-      'Wrong winner',
-    )
-    await user.click(within(rejectDialog).getByRole('button', { name: /reject scores/i }))
-
-    await screen.findByRole('heading', { name: /count the cards/i })
-    expect(screen.getByText(/these scores were sent back/i)).toBeInTheDocument()
-    expect(screen.getByText(/wrong winner/i)).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Review' }))
-    const reviewAgain = await screen.findByRole('dialog')
-    await user.click(within(reviewAgain).getByRole('button', { name: /submit for approval/i }))
-    await screen.findByRole('heading', { name: /scores submitted/i })
-
-    await user.click(screen.getByRole('button', { name: /^approve$/i }))
-    await screen.findByRole('heading', { name: /scores accepted/i })
-    await user.click(screen.getByRole('button', { name: /finalize round/i }))
-    const confirm = await screen.findByRole('dialog')
-    await user.click(within(confirm).getByRole('button', { name: /finalize round/i }))
     expect(
       await screen.findByRole('heading', { name: /ana takes the round/i }),
     ).toBeInTheDocument()
+    const benRow = screen.getByText('Ben').closest('div')
+    expect(screen.getByText(/10 points across the rest/i)).toBeInTheDocument()
+    expect(benRow).not.toBeNull()
+
+    // No approval surfaces remain anywhere in the flow.
+    expect(screen.queryByText(/approval/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /approve|reject/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/pending/i)).not.toBeInTheDocument()
   })
 
   it('flags a cutoff tie, resolves it manually and keeps the leaderboard honest', async () => {
@@ -189,8 +173,7 @@ describe('UNO Night app flow', () => {
     await confirmOpenHand(user, { label: 'Wild count for Cara', value: '1' })
     await confirmOpenHand(user)
 
-    await user.click(screen.getByRole('button', { name: 'Review' }))
-    await submitAndFinalize(user)
+    await reviewAndConfirm(user)
 
     expect(
       await screen.findByRole('heading', { name: /too close to call/i }),
@@ -216,8 +199,7 @@ describe('UNO Night app flow', () => {
     await confirmOpenHand(user, { label: 'Skip count for Ben', value: '1' })
     await confirmOpenHand(user, { label: 'Number 5 count for Cara', value: '1' })
 
-    await user.click(screen.getByRole('button', { name: 'Review' }))
-    await submitAndFinalize(user)
+    await reviewAndConfirm(user)
 
     expect(
       await screen.findByRole('heading', { name: /two players remain/i }),
@@ -241,9 +223,9 @@ describe('UNO Night app flow', () => {
     await screen.findByRole('heading', { name: /set up the table/i })
   })
 
-  it('blocks review until every hand is confirmed and shows the rejection state', async () => {
+  it('blocks review until every hand is confirmed', async () => {
     const user = userEvent.setup()
-    await startGame(user, { mode: 'manual' })
+    await startGame(user)
     await beginRound(user)
     await selectWinner(user, 'Ana')
     await confirmOpenHand(user)
@@ -308,8 +290,7 @@ describe('UNO Night app flow', () => {
     await confirmOpenHand(user)
     await confirmOpenHand(user, { label: 'Number 4 count for Cara', value: '1' })
 
-    await user.click(screen.getByRole('button', { name: 'Review' }))
-    await submitAndFinalize(user)
+    await reviewAndConfirm(user)
     await screen.findByRole('heading', { name: /ana takes the round/i })
 
     await user.click(screen.getByRole('button', { name: 'Game menu' }))

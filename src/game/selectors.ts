@@ -6,8 +6,6 @@ export type Screen =
   | 'setup'
   | 'dashboard'
   | 'entry'
-  | 'pending'
-  | 'approved'
   | 'results'
   | 'tiebreak'
   | 'decision'
@@ -15,7 +13,7 @@ export type Screen =
   | 'leaderboard'
 
 /**
- * A round in progress always owns the screen. Unresolved ties and controller
+ * A round being recorded always owns the screen. Unresolved ties and controller
  * decisions block play until they are handled, so they also force their screen.
  */
 export function resolveScreen(game: GameState, requested: Screen): Screen {
@@ -24,16 +22,7 @@ export function resolveScreen(game: GameState, requested: Screen): Screen {
   }
   if (game.phase === 'finished') return 'final'
 
-  if (game.currentRound) {
-    switch (game.currentRound.status) {
-      case 'pending':
-        return 'pending'
-      case 'approved':
-        return 'approved'
-      default:
-        return 'entry'
-    }
-  }
+  if (game.currentRound) return 'entry'
 
   if (game.decision) {
     return requested === 'leaderboard' ? 'leaderboard' : 'decision'
@@ -60,7 +49,7 @@ export interface ScorePreview extends ComputeRoundOutput {
   projectedTotals: Record<string, number>
 }
 
-/** Calculates the preview shown in entry, review and approval screens. */
+/** Calculates the preview shown while entering and reviewing a round. */
 export function scorePreview(game: GameState, round: CurrentRound): ScorePreview {
   const lines = computeRoundScores({
     participants: round.participants,

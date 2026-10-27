@@ -125,12 +125,12 @@ export function parseCardCount(raw: string): CountParseResult {
   return { ok: true, value, error: null }
 }
 
-/** Common messages for review/approval errors. */
+/** Common messages for round review errors. */
 export const ROUND_ERRORS = {
   noWinner: 'Select the round winner.',
   multipleWinners: 'Only one player can win a round.',
   missingPlayer: (name: string) => `Record ${name}'s remaining cards and confirm the hand.`,
-  unconfirmedPlayer: (name: string) => `Confirm ${name}'s hand before submitting.`,
+  unconfirmedPlayer: (name: string) => `Confirm ${name}'s hand before reviewing the round.`,
   invalidCount: (name: string) => `Fix ${name}'s card counts. Use whole numbers from 0–${MAX_CARD_COUNT}.`,
 } as const
 

@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { AlertCircle, X } from 'lucide-react'
 import { HomeScreen } from '@/screens/HomeScreen'
-import { SetupScreen, type SetupSubmission } from '@/screens/SetupScreen'
+import { SetupScreen, type SetupDetails } from '@/screens/SetupScreen'
 import { DashboardScreen } from '@/screens/DashboardScreen'
 import { ScoreEntryScreen } from '@/screens/ScoreEntryScreen'
-import { PendingApprovalScreen } from '@/screens/PendingApprovalScreen'
-import { ApprovedScreen } from '@/screens/ApprovedScreen'
 import { RoundResultsScreen } from '@/screens/RoundResultsScreen'
 import { LeaderboardScreen } from '@/screens/LeaderboardScreen'
 import { TieBreakScreen } from '@/screens/TieBreakScreen'
@@ -71,14 +69,13 @@ export default function App() {
     [game.players],
   )
 
-  function startGame(submission: SetupSubmission) {
+  function startGame(details: SetupDetails) {
     dispatch({
       type: 'START_GAME',
       payload: {
-        players: submission.names.map((name) => ({ id: createId('player'), name })),
-        name: submission.name,
-        cutoff: submission.cutoff,
-        approvalMode: submission.approvalMode,
+        players: details.names.map((name) => ({ id: createId('player'), name })),
+        name: details.name,
+        cutoff: details.cutoff,
         at: Date.now(),
       },
     })
@@ -116,7 +113,8 @@ export default function App() {
     setRoute(kind === 'tie-break' ? 'tiebreak' : 'dashboard')
   }
 
-  function finalizeRound() {
+  /** A confirmed round is recorded immediately; show its results. */
+  function showRoundResults() {
     setRoute('results')
   }
 
@@ -190,13 +188,8 @@ export default function App() {
           <ScoreEntryScreen
             {...gameChrome}
             onDiscardRound={discardRound}
+            onRoundConfirmed={showRoundResults}
           />
-        )}
-
-        {screen === 'pending' && <PendingApprovalScreen {...gameChrome} />}
-
-        {screen === 'approved' && (
-          <ApprovedScreen {...gameChrome} onFinalized={finalizeRound} />
         )}
 
         {screen === 'results' && (
@@ -283,7 +276,7 @@ export default function App() {
         open={confirm === 'reset'}
         onOpenChange={(open) => setConfirm(open ? 'reset' : null)}
         title="Reset this game?"
-        description="The current game will be lost. Every player, score, round, approval and elimination is removed from this device immediately. This cannot be undone."
+        description="The current game will be lost. Every player, score, round and elimination is removed from this device immediately. This cannot be undone."
         confirmLabel="Reset game"
         tone="danger"
         onConfirm={resetGame}

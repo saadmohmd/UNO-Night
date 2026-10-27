@@ -4,11 +4,10 @@ import {
   Info,
   ListOrdered,
   Play,
-  ShieldCheck,
+  RotateCcw,
   Sparkles,
   Trophy,
   Users,
-  Zap,
 } from 'lucide-react'
 import { GameHeader } from '@/components/game/GameHeader'
 import { StandingsList } from '@/components/game/StandingsList'
@@ -69,17 +68,6 @@ export function DashboardScreen({
           <span className="text-[10px] font-semibold tracking-[0.2em] text-brand uppercase">
             {game.config.name || 'Game in progress'}
           </span>
-          <Badge variant="outline">
-            {game.config.approvalMode === 'manual' ? (
-              <>
-                <ShieldCheck className="size-3" /> Manual approval
-              </>
-            ) : (
-              <>
-                <Zap className="size-3" /> Auto approval
-              </>
-            )}
-          </Badge>
           {game.allowTwoPlayerRounds && <Badge variant="yellow">2-player rule</Badge>}
         </div>
 
@@ -130,10 +118,10 @@ export function DashboardScreen({
             icon={<Gavel className="size-3.5" />}
           />
           <StatTile
-            label="Approval"
-            value={game.config.approvalMode === 'manual' ? 'Manual' : 'Auto'}
-            hint={game.config.approvalMode === 'manual' ? 'Table reviews scores' : 'Accepted on submit'}
-            icon={<ShieldCheck className="size-3.5" />}
+            label="Rounds played"
+            value={`${game.rounds.length}`}
+            hint={game.rounds.length === 1 ? 'Round confirmed' : 'Rounds confirmed'}
+            icon={<RotateCcw className="size-3.5" />}
           />
         </div>
 

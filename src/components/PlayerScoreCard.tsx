@@ -17,7 +17,7 @@ export interface PlayerScoreCardProps {
   className?: string
 }
 
-/** Reusable card-by-card calculation card used for review, approval and results. */
+/** Reusable card-by-card calculation card used for review and results. */
 export function PlayerScoreCard({
   name,
   index,

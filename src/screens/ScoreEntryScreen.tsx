@@ -1,14 +1,5 @@
 import { useState, type Dispatch } from 'react'
-import {
-  ArrowRight,
-  Check,
-  Crown,
-  Lock,
-  ShieldCheck,
-  Trash2,
-  TriangleAlert,
-  Zap,
-} from 'lucide-react'
+import { ArrowRight, Check, Crown, Lock, Trash2, TriangleAlert } from 'lucide-react'
 import { GameHeader } from '@/components/game/GameHeader'
 import { CardCountTile } from '@/components/game/CardCountTile'
 import { PlayerAvatar } from '@/components/PlayerAvatar'
@@ -183,6 +174,7 @@ export function ScoreEntryScreen({
   onEndGame,
   onReset,
   onDiscardRound,
+  onRoundConfirmed,
 }: {
   game: GameState
   dispatch: Dispatch<GameAction>
@@ -191,6 +183,7 @@ export function ScoreEntryScreen({
   onEndGame: () => void
   onReset: () => void
   onDiscardRound: () => void
+  onRoundConfirmed: () => void
 }) {
   const round = game.currentRound
   const [openPlayer, setOpenPlayer] = useState<string | undefined>(round?.participants[0])
@@ -241,9 +234,12 @@ export function ScoreEntryScreen({
     }
   }
 
-  function handleSubmit() {
+  function handleConfirmRound() {
+    // The reducer is the source of truth; only navigate when the round is valid.
+    if (!validation.ok) return
     setReviewOpen(false)
-    dispatch({ type: 'SUBMIT_ROUND', at: Date.now() })
+    dispatch({ type: 'CONFIRM_ROUND', at: Date.now() })
+    onRoundConfirmed()
   }
 
   let helper: string
@@ -252,7 +248,7 @@ export function ScoreEntryScreen({
     const remaining = participants.length - confirmedCount
     helper = `${remaining} hand${remaining === 1 ? '' : 's'} left to confirm.`
   } else if (!validation.ok) helper = validation.errors[0]
-  else helper = 'All hands recorded — review before submitting.'
+  else helper = 'All hands recorded — confirm the round.'
 
   return (
     <ScreenShell
@@ -271,17 +267,6 @@ export function ScoreEntryScreen({
           <Badge variant={isTieBreak ? 'yellow' : 'blue'}>
             {isTieBreak ? 'Tie-break' : `Round ${round.roundNumber}`}
           </Badge>
-          <Badge variant="outline">
-            {round.mode === 'manual' ? (
-              <>
-                <ShieldCheck className="size-3" /> Manual approval
-              </>
-            ) : (
-              <>
-                <Zap className="size-3" /> Auto approval
-              </>
-            )}
-          </Badge>
         </div>
         <h1 className="mt-3 font-display text-3xl leading-tight font-semibold tracking-[-0.03em] text-ink sm:text-4xl">
           {isTieBreak ? 'Settle the tie' : 'Count the cards'}
@@ -291,27 +276,6 @@ export function ScoreEntryScreen({
             ? 'The tied players play one sudden-death hand. Lowest penalty survives; highest penalty is knocked out.'
             : 'After the hand ends, record what each player still holds. The winner scores zero.'}
         </p>
-
-        {round.rejection && (
-          <div
-            role="status"
-            className="mt-4 rounded-2xl border border-uno-red/25 bg-uno-red/[0.06] p-4"
-          >
-            <div className="flex items-center gap-2">
-              <Badge variant="red">Rejected</Badge>
-              <p className="text-[13px] font-medium text-ink">These scores were sent back</p>
-            </div>
-            {round.rejection.reason && (
-              <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">
-                “{round.rejection.reason}”
-              </p>
-            )}
-            <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-              Nothing has been applied to the leaderboard. Correct the hands and submit
-              again when the table is ready.
-            </p>
-          </div>
-        )}
 
         <section className="mt-6 rounded-2xl border border-line/80 bg-surface/60 p-4 sm:p-5">
           <fieldset>
@@ -419,7 +383,7 @@ export function ScoreEntryScreen({
         <div className="mt-5 flex items-center justify-between gap-3">
           <p className="text-[11px] leading-relaxed text-faint">
             <Lock className="mr-1 inline size-3" />
-            Scores lock once submitted. Approvals and finalization happen next.
+            Confirming the round applies the penalties immediately.
           </p>
           <Button
             variant="ghost"
@@ -458,19 +422,19 @@ export function ScoreEntryScreen({
       </StickyActionBar>
 
       <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
-        <DialogContent className="sm:w-[min(94vw,40rem)]">
+        <DialogContent className="flex max-h-[92dvh] flex-col overflow-hidden sm:w-[min(94vw,40rem)]">
           <DialogHeader>
             <DialogTitle>
               Review {isTieBreak ? 'tie-break' : `round ${round.roundNumber}`}
             </DialogTitle>
             <DialogDescription>
               {isTieBreak
-                ? 'Check every hand. The highest penalty in this hand is knocked out; cumulative totals stay as they are.'
-                : 'Check every hand with the table. Nothing is added to cumulative scores until the round is finalized.'}
+                ? 'Check every hand. Confirming knocks out the highest penalty in this hand; cumulative totals stay as they are.'
+                : 'Check every hand with the table. Confirming adds these penalties to the cumulative scores and checks the cutoff.'}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="mt-4 space-y-2.5">
+          <div className="-mx-1 mt-4 min-h-0 flex-1 space-y-2.5 overflow-y-auto px-1 pb-1">
             {preview.lines.map((line) => (
               <PlayerScoreCard
                 key={line.playerId}
@@ -486,7 +450,7 @@ export function ScoreEntryScreen({
             ))}
           </div>
 
-          <div className="mt-4 flex items-center justify-between rounded-xl border border-line bg-surface/60 px-4 py-3">
+          <div className="mt-4 flex shrink-0 items-center justify-between rounded-xl border border-line bg-surface/60 px-4 py-3">
             <span className="text-[11px] font-semibold tracking-wide text-muted uppercase">
               {isTieBreak ? 'Hand penalties' : 'Round penalty'}
             </span>
@@ -494,19 +458,17 @@ export function ScoreEntryScreen({
               {formatNumber(totalPenalty)} pts
             </span>
           </div>
-          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-faint">
-            <Lock className="size-3" />
-            {round.mode === 'manual'
-              ? 'This will go to the table for approval before it can be finalized.'
-              : 'Automatic approval — valid scores are accepted as soon as you submit.'}
+          <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-faint">
+            <Lock className="mt-0.5 size-3 shrink-0" />
+            Confirming is final — the round cannot be edited afterwards.
           </p>
 
-          <DialogFooter className="mt-5">
+          <DialogFooter className="mt-5 shrink-0 pb-4 sm:pb-0">
             <Button variant="outline" onClick={() => setReviewOpen(false)}>
               Back to edit
             </Button>
-            <Button onClick={handleSubmit}>
-              {round.mode === 'manual' ? 'Submit for approval' : 'Submit scores'}
+            <Button onClick={handleConfirmRound}>
+              Confirm round
               <ArrowRight className="size-4" />
             </Button>
           </DialogFooter>
@@ -520,7 +482,7 @@ export function ScoreEntryScreen({
         description={
           isTieBreak
             ? 'No result has been recorded. You can replay or resolve the tie another way.'
-            : 'Every card count for this round will be cleared. Finalized rounds are never affected.'
+            : 'Every card count for this round will be cleared. Already confirmed rounds are never affected.'
         }
         confirmLabel="Discard entry"
         tone="danger"

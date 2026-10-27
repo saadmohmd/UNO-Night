@@ -7,7 +7,7 @@ import {
   scorePreview,
   type Screen,
 } from '../selectors'
-import type { ApprovalMode, GameState } from '../types'
+import type { GameState } from '../types'
 
 function must(state: GameState, action: GameAction): GameState {
   const result = gameReducer(state, action)
@@ -15,14 +15,13 @@ function must(state: GameState, action: GameAction): GameState {
   return result.state
 }
 
-function start(names = ['Ana', 'Ben', 'Cara'], options: { cutoff?: number; mode?: ApprovalMode } = {}) {
+function start(names = ['Ana', 'Ben', 'Cara'], options: { cutoff?: number } = {}) {
   return must(createInitialGameState(), {
     type: 'START_GAME',
     payload: {
       players: names.map((name, index) => ({ id: `p${index + 1}`, name })),
       name: '',
       cutoff: options.cutoff ?? 200,
-      approvalMode: options.mode ?? 'automatic',
       at: 1,
     },
   })
@@ -62,21 +61,20 @@ describe('resolveScreen', () => {
     expect(resolveScreen(state, 'leaderboard')).toBe('entry')
   })
 
-  it('forces pending approval and approved screens', () => {
-    let state = must(start(['Ana', 'Ben', 'Cara'], { mode: 'manual' }), { type: 'BEGIN_ROUND', at: 2 })
+  it('keeps owning the screen until the round is confirmed', () => {
+    let state = must(start(), { type: 'BEGIN_ROUND', at: 2 })
     state = fill(state, 'p1', {})
-    state = must(state, { type: 'SUBMIT_ROUND', at: 3 })
-    expect(resolveScreen(state, requested)).toBe('pending')
-    state = must(state, { type: 'APPROVE_ROUND', at: 4 })
-    expect(resolveScreen(state, requested)).toBe('approved')
-    expect(resolveScreen(state, 'leaderboard')).toBe('approved')
+    expect(resolveScreen(state, requested)).toBe('entry')
+    expect(resolveScreen(state, 'leaderboard')).toBe('entry')
+    state = must(state, { type: 'CONFIRM_ROUND', at: 3 })
+    expect(resolveScreen(state, requested)).toBe('dashboard')
+    expect(resolveScreen(state, 'leaderboard')).toBe('leaderboard')
   })
 
   it('forces the tie-break screen but allows the leaderboard', () => {
     let state = must(start(['Ana', 'Ben', 'Cara', 'Dev'], { cutoff: 1 }), { type: 'BEGIN_ROUND', at: 2 })
     state = fill(state, 'p1', { p2: { wild: 1 }, p3: { wild: 1 } })
-    state = must(state, { type: 'SUBMIT_ROUND', at: 3 })
-    state = must(state, { type: 'FINALIZE_ROUND', at: 4 })
+    state = must(state, { type: 'CONFIRM_ROUND', at: 3 })
     expect(resolveScreen(state, 'results')).toBe('tiebreak')
     expect(resolveScreen(state, 'leaderboard')).toBe('leaderboard')
   })
@@ -84,8 +82,7 @@ describe('resolveScreen', () => {
   it('forces the controller decision screen', () => {
     let state = must(start(['Ana', 'Ben', 'Cara'], { cutoff: 1 }), { type: 'BEGIN_ROUND', at: 2 })
     state = fill(state, 'p1', { p2: { wild: 1 }, p3: { n5: 1 } })
-    state = must(state, { type: 'SUBMIT_ROUND', at: 3 })
-    state = must(state, { type: 'FINALIZE_ROUND', at: 4 })
+    state = must(state, { type: 'CONFIRM_ROUND', at: 3 })
     expect(resolveScreen(state, 'dashboard')).toBe('decision')
     expect(resolveScreen(state, 'leaderboard')).toBe('leaderboard')
   })
@@ -99,8 +96,7 @@ describe('resolveScreen', () => {
   it('shows the results screen when a finalized round exists', () => {
     let state = must(start(['Ana', 'Ben', 'Cara'], { cutoff: 999 }), { type: 'BEGIN_ROUND', at: 2 })
     state = fill(state, 'p1', { p2: { n5: 1 } })
-    state = must(state, { type: 'SUBMIT_ROUND', at: 3 })
-    state = must(state, { type: 'FINALIZE_ROUND', at: 4 })
+    state = must(state, { type: 'CONFIRM_ROUND', at: 3 })
     expect(resolveScreen(state, 'results')).toBe('results')
   })
 })
@@ -118,8 +114,7 @@ describe('canBeginRound', () => {
   it('blocks two-player rounds until the table opts in', () => {
     let state = must(start(['Ana', 'Ben', 'Cara'], { cutoff: 1 }), { type: 'BEGIN_ROUND', at: 2 })
     state = fill(state, 'p1', { p2: { wild: 1 }, p3: { n5: 1 } })
-    state = must(state, { type: 'SUBMIT_ROUND', at: 3 })
-    state = must(state, { type: 'FINALIZE_ROUND', at: 4 })
+    state = must(state, { type: 'CONFIRM_ROUND', at: 3 })
     expect(canBeginRound(state).allowed).toBe(false)
     state = must(state, { type: 'CONTINUE_WITH_TWO_PLAYERS' })
     expect(canBeginRound(state).allowed).toBe(true)

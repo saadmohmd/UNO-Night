@@ -2,7 +2,7 @@
 
 A single-device companion app for physical UNO games. One phone, tablet or laptop sits
 on the table; everyone records the cards left in their hand after each round and the app
-handles the maths, approvals and the knockout cutoff.
+handles the maths and the knockout cutoff.
 
 - 100% client-side. No backend, no accounts, no database, no network calls after load.
 - Sessions live in memory only. Refreshing, closing the tab or resetting clears everything.
@@ -42,7 +42,6 @@ No environment variables, server routes or API keys are involved.
 - 3–7 players with unique names (case and surrounding whitespace are ignored).
 - Optional game name.
 - Score cutoff (1–100,000) — preset chips or free entry.
-- Submission mode: **manual approval** or **automatic approval**.
 - The roster locks once the game starts; leaving the page warns you first.
 
 ### Scoring (official point values)
@@ -66,16 +65,15 @@ screen — there is no duplicated formula in the UI.
 2. Pick the single round winner, then record and confirm each player's remaining cards
    (steppers plus direct numeric entry, live penalty preview).
 3. Review the card-by-card breakdown in a confirmation sheet.
-4. Submit — pending approval, or accepted immediately in automatic mode.
-5. Approve / reject (rejections never touch cumulative scores), then finalize.
-6. Scores are applied, the cutoff is evaluated, and results are shown.
-7. Continue with the next round when at least the minimum number of players remains.
+4. Confirm the round — the scores are applied immediately and the cutoff is evaluated.
+5. Results are shown, and the next round can start once at least the minimum number of
+   players remains.
 
-A round cannot be finalized before it is valid, cannot be finalized twice, and a new round
-cannot start while one is open, pending, or awaiting a tie-break.
+Confirming is final: a round cannot be confirmed until every hand is valid, cannot be
+confirmed twice, and a new round cannot start while one is open or awaiting a tie-break.
 
 ### Cutoff and eliminations
-After a **finalized** round, the eligible player with the highest cumulative score is
+After a **confirmed** round, the eligible player with the highest cumulative score is
 knocked out **only if** that score is greater than or equal to the cutoff.
 
 - 199 at a cutoff of 200 → stays in. 200 → out. 215 → out.
@@ -100,7 +98,7 @@ src/
     selectors.ts    screen resolution and derived view data
     __tests__/      unit tests for every rule above
   components/      design system + game UI pieces
-  screens/         Home, Setup, Dashboard, Score Entry, Approval, Results,
+  screens/         Home, Setup, Dashboard, Score Entry, Results,
                    Leaderboard, Tie-break, Decision, Final
   hooks/           beforeunload guard
   __tests__/       full user-journey component tests
@@ -111,5 +109,5 @@ src/
 - The `beforeunload` warning is best-effort: browsers decide whether to show it, and a lost
   session cannot be recovered because nothing is persisted by design.
 - Elimination uses the "single knockout" reading of the cutoff rule: only the worst eligible
-  player leaves per finalized round. Ties are surfaced rather than resolved arbitrarily.
+  player leaves per confirmed round. Ties are surfaced rather than resolved arbitrarily.
 - Two identical names are rejected; names are trimmed but otherwise preserved as typed.

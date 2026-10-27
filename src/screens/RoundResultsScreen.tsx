@@ -147,7 +147,7 @@ export function RoundResultsScreen({
               Score breakdown
             </h2>
             <span className="text-[11px] text-faint">
-              {round.mode === 'manual' ? 'Approved by table' : 'Auto-approved'}
+              {round.lines.length} hands counted
             </span>
           </div>
           <div className="space-y-2.5">

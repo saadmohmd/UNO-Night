@@ -2,15 +2,12 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   AlertCircle,
   ArrowLeft,
-  CircleCheck,
   Gavel,
   Lock,
   Plus,
-  ShieldCheck,
   Sparkles,
   Trash2,
   Users,
-  Zap,
 } from 'lucide-react'
 import { AppHeader, ScreenShell, StickyActionBar } from '@/components/AppHeader'
 import { Button } from '@/components/ui/button'
@@ -27,52 +24,26 @@ import {
   validateCutoff,
   validateRoster,
 } from '@/game/validation'
-import type { ApprovalMode } from '@/game/types'
 import { cn } from '@/lib/utils'
 
-export interface SetupSubmission {
+export interface SetupDetails {
   names: string[]
   name: string
   cutoff: number
-  approvalMode: ApprovalMode
 }
 
 const CUTOFF_PRESETS = [100, 200, 300, 500]
-
-const MODES: {
-  value: ApprovalMode
-  title: string
-  description: string
-  icon: typeof ShieldCheck
-  accent: string
-}[] = [
-  {
-    value: 'manual',
-    title: 'Manual approval',
-    description: 'Scores wait for the table to approve them before they count.',
-    icon: ShieldCheck,
-    accent: 'text-uno-blue bg-uno-blue/12 border-uno-blue/25',
-  },
-  {
-    value: 'automatic',
-    title: 'Automatic approval',
-    description: 'Valid scores are accepted immediately and are ready to finalize.',
-    icon: Zap,
-    accent: 'text-brand bg-brand/12 border-brand/25',
-  },
-]
 
 export function SetupScreen({
   onStart,
   onBack,
 }: {
-  onStart: (submission: SetupSubmission) => void
+  onStart: (details: SetupDetails) => void
   onBack: () => void
 }) {
   const [gameName, setGameName] = useState('')
   const [names, setNames] = useState<string[]>(['', '', ''])
   const [cutoffRaw, setCutoffRaw] = useState(String(DEFAULT_CUTOFF))
-  const [mode, setMode] = useState<ApprovalMode>('automatic')
   const [attempted, setAttempted] = useState(false)
   const [blurred, setBlurred] = useState<Set<number>>(new Set())
   const [cutoffBlurred, setCutoffBlurred] = useState(false)
@@ -132,7 +103,6 @@ export function SetupScreen({
       names: names.map(cleanName),
       name: cleanName(gameName),
       cutoff: cutoff.value,
-      approvalMode: mode,
     })
   }
 
@@ -172,8 +142,8 @@ export function SetupScreen({
           Set up the table
         </h1>
         <p className="mt-2 max-w-lg text-[15px] leading-relaxed text-muted">
-          Seat 3–7 players, choose the knockout line and how scores get accepted.
-          The roster locks the moment you start.
+          Seat 3–7 players and choose the knockout line. The roster locks the
+          moment you start.
         </p>
 
         <form id="setup-form" onSubmit={handleSubmit} className="mt-7 space-y-4" noValidate>
@@ -351,57 +321,6 @@ export function SetupScreen({
             )}
           </section>
 
-          <section className="rounded-2xl border border-line/80 bg-surface/60 p-5">
-            <Label>Score submission</Label>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-muted">
-              Everyone shares this device. Choose whether scores need approval
-              before they count.
-            </p>
-            <div className="mt-3.5 grid gap-2.5 sm:grid-cols-2" role="radiogroup" aria-label="Score submission mode">
-              {MODES.map((option) => {
-                const selected = mode === option.value
-                return (
-                  <label
-                    key={option.value}
-                    className={cn(
-                      'relative flex cursor-pointer gap-3 rounded-xl border p-3.5 transition-colors',
-                      selected
-                        ? 'border-brand/45 bg-brand/[0.07]'
-                        : 'border-line bg-surface-2/40 hover:border-line-soft',
-                    )}
-                  >
-                    <input
-                      type="radio"
-                      name="approval-mode"
-                      value={option.value}
-                      checked={selected}
-                      onChange={() => setMode(option.value)}
-                      className="peer sr-only"
-                    />
-                    <span
-                      className={cn(
-                        'flex size-9 shrink-0 items-center justify-center rounded-lg border',
-                        option.accent,
-                      )}
-                      aria-hidden="true"
-                    >
-                      <option.icon className="size-4" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="flex items-center gap-1.5 text-sm font-semibold text-ink">
-                        {option.title}
-                        {selected && <CircleCheck className="size-3.5 text-brand" />}
-                      </span>
-                      <span className="mt-0.5 block text-[11px] leading-relaxed text-muted">
-                        {option.description}
-                      </span>
-                    </span>
-                  </label>
-                )
-              })}
-            </div>
-          </section>
-
           {attempted && !valid && (
             <div
               role="alert"
@@ -427,7 +346,7 @@ export function SetupScreen({
         <div className="min-w-0 flex-1">
           <p className="truncate text-[11px] text-faint">
             {valid
-              ? `${names.length} players · ${mode === 'manual' ? 'manual approval' : 'auto approval'}`
+              ? `${names.length} players · cutoff ${cutoff.value}`
               : 'Complete the setup to start.'}
           </p>
           <p className="mt-0.5 truncate text-xs font-medium text-ink-soft">

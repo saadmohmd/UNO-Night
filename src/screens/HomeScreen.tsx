@@ -120,7 +120,7 @@ export function HomeScreen({ onNewGame }: { onNewGame: () => void }) {
               <span className="text-brand">not the math.</span>
             </h1>
             <p className="mt-5 max-w-md text-[15px] leading-relaxed text-muted sm:text-base">
-              One phone on the table. Accurate UNO scores, clean approvals and a
+              One phone on the table. Accurate UNO scores, card-by-card maths and a
               knockout cutoff — without paper, arguments or accounts.
             </p>
             <div className="mt-8 flex w-full max-w-xs flex-col gap-3">

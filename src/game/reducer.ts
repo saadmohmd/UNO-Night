@@ -1,8 +1,12 @@
 /**
  * Pure game state machine. Every mutation is validated and no action can
- * silently change a score, invent a winner or finalize a round twice.
+ * silently change a score, invent a winner or confirm a round twice.
  *
- * Elimination rule: after a finalized round, the eligible player with the
+ * Round flow: enter the card counts, review them, then confirm. Confirming is a
+ * single atomic step — it validates the entry, applies the penalties, evaluates
+ * the cutoff and records the round. There is no submission or approval stage.
+ *
+ * Elimination rule: after a confirmed round, the eligible player with the
  * highest cumulative score is knocked out — but only once that score reaches
  * the cutoff. If that top score is shared, no one is eliminated until the tie
  * is resolved (replay or explicit controller decision).
@@ -34,14 +38,11 @@ export type GameErrorCode =
   | 'INVALID_PHASE'
   | 'INVALID_SETUP'
   | 'ROUND_IN_PROGRESS'
-  | 'ROUND_LOCKED'
   | 'NO_CURRENT_ROUND'
   | 'NO_TIE_BREAK'
   | 'NO_DECISION'
   | 'INVALID_TIE_BREAK_RESOLUTION'
   | 'INCOMPLETE_ROUND'
-  | 'NOT_PENDING'
-  | 'NOT_APPROVED'
   | 'NOT_FINISHED'
   | 'INVALID_PLAYER'
   | 'INVALID_COUNT'
@@ -65,10 +66,7 @@ export type GameAction =
   | { type: 'INCREMENT_COUNT'; playerId: string; card: CardKey; delta: number }
   | { type: 'CONFIRM_HAND'; playerId: string; confirmed: boolean }
   | { type: 'SET_WINNER'; playerId: string }
-  | { type: 'SUBMIT_ROUND'; at: number }
-  | { type: 'APPROVE_ROUND'; at: number }
-  | { type: 'REJECT_ROUND'; at: number; reason: string | null }
-  | { type: 'FINALIZE_ROUND'; at: number }
+  | { type: 'CONFIRM_ROUND'; at: number }
   | { type: 'DISCARD_ROUND' }
   | { type: 'RESOLVE_TIE_BREAK_MANUAL'; playerId: string; at: number; note?: string | null }
   | { type: 'CONTINUE_WITH_TWO_PLAYERS' }
@@ -238,9 +236,6 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
       if (new Set(ids).size !== ids.length || ids.some((id) => !id.trim())) {
         return fail(state, 'INVALID_SETUP', 'Player identifiers must be unique.')
       }
-      if (payload.approvalMode !== 'manual' && payload.approvalMode !== 'automatic') {
-        return fail(state, 'INVALID_SETUP', 'Choose a score submission mode.')
-      }
 
       const players: PlayerRecord[] = payload.players.map((player) => ({
         id: player.id,
@@ -257,7 +252,6 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
         config: {
           name: payload.name.trim(),
           cutoff: cutoff.value,
-          approvalMode: payload.approvalMode,
           startedAt: payload.at,
         },
         players,
@@ -295,12 +289,6 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
         participants,
         entries: emptyEntries(participants),
         winnerId: null,
-        status: 'draft',
-        mode: state.config.approvalMode,
-        submittedAt: null,
-        approvedAt: null,
-        autoApproved: false,
-        rejection: null,
         tieBreakPlayerIds: null,
       }
       return ok({ ...state, currentRound })
@@ -325,12 +313,6 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
         participants,
         entries: emptyEntries(participants),
         winnerId: null,
-        status: 'draft',
-        mode: state.config.approvalMode,
-        submittedAt: null,
-        approvedAt: null,
-        autoApproved: false,
-        rejection: null,
         tieBreakPlayerIds: [...participants],
       }
       return ok({ ...state, currentRound })
@@ -339,9 +321,6 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
     case 'SET_COUNT': {
       const round = state.currentRound
       if (!round) return fail(state, 'NO_CURRENT_ROUND', 'There is no round being recorded.')
-      if (round.status === 'pending' || round.status === 'approved') {
-        return fail(state, 'ROUND_LOCKED', 'This round is locked while it is reviewed or approved.')
-      }
       if (!round.participants.includes(action.playerId)) {
         return fail(state, 'INVALID_PLAYER', 'That player is not part of this round.')
       }
@@ -379,9 +358,6 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
     case 'INCREMENT_COUNT': {
       const round = state.currentRound
       if (!round) return fail(state, 'NO_CURRENT_ROUND', 'There is no round being recorded.')
-      if (round.status === 'pending' || round.status === 'approved') {
-        return fail(state, 'ROUND_LOCKED', 'This round is locked while it is reviewed or approved.')
-      }
       const entry = round.entries[action.playerId]
       if (!entry) return fail(state, 'INVALID_PLAYER', 'That player is not part of this round.')
       const next = (entry.counts[action.card] ?? 0) + action.delta
@@ -406,9 +382,6 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
     case 'CONFIRM_HAND': {
       const round = state.currentRound
       if (!round) return fail(state, 'NO_CURRENT_ROUND', 'There is no round being recorded.')
-      if (round.status === 'pending' || round.status === 'approved') {
-        return fail(state, 'ROUND_LOCKED', 'This round is locked while it is reviewed or approved.')
-      }
       const entry = round.entries[action.playerId]
       if (!entry) return fail(state, 'INVALID_PLAYER', 'That player is not part of this round.')
       return ok({
@@ -426,9 +399,6 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
     case 'SET_WINNER': {
       const round = state.currentRound
       if (!round) return fail(state, 'NO_CURRENT_ROUND', 'There is no round being recorded.')
-      if (round.status === 'pending' || round.status === 'approved') {
-        return fail(state, 'ROUND_LOCKED', 'This round is locked while it is reviewed or approved.')
-      }
       if (!round.participants.includes(action.playerId)) {
         return fail(state, 'INVALID_PLAYER', 'Choose the winner from this round’s players.')
       }
@@ -438,15 +408,13 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
       })
     }
 
-    case 'SUBMIT_ROUND': {
+    case 'CONFIRM_ROUND': {
       const round = state.currentRound
-      if (!round) return fail(state, 'NO_CURRENT_ROUND', 'There is no round to submit.')
-      if (round.status === 'pending') {
-        return fail(state, 'NOT_PENDING', 'These scores are already awaiting approval.')
-      }
-      if (round.status === 'approved') {
-        return fail(state, 'NOT_APPROVED', 'These scores have already been approved.')
-      }
+      if (!round) return fail(state, 'NO_CURRENT_ROUND', 'There is no round to confirm.')
+      if (!state.config) return fail(state, 'INVALID_PHASE', 'No active game.')
+
+      // Confirming is the only way a round can be recorded, so it validates the
+      // full entry itself: complete hands, exactly one winner, valid counts.
       const validation = validateRoundEntry({
         participants: round.participants.map((id) => ({
           id,
@@ -458,72 +426,9 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
       if (!validation.ok) {
         return fail(state, 'INCOMPLETE_ROUND', validation.errors[0])
       }
-      const approvedNow = round.mode === 'automatic'
-      const nextRound: CurrentRound = {
-        ...round,
-        status: approvedNow ? 'approved' : 'pending',
-        submittedAt: action.at,
-        approvedAt: approvedNow ? action.at : null,
-        autoApproved: approvedNow,
-        rejection: null,
-      }
-      return ok({ ...state, currentRound: nextRound })
-    }
-
-    case 'APPROVE_ROUND': {
-      const round = state.currentRound
-      if (!round) return fail(state, 'NO_CURRENT_ROUND', 'There is no round to approve.')
-      if (round.mode !== 'manual') {
-        return fail(state, 'INVALID_PHASE', 'This game uses automatic approval.')
-      }
-      if (round.status !== 'pending') {
-        return fail(state, 'NOT_PENDING', 'Only pending scores can be approved.')
-      }
-      return ok({
-        ...state,
-        currentRound: {
-          ...round,
-          status: 'approved',
-          approvedAt: action.at,
-          autoApproved: false,
-          rejection: null,
-        },
-      })
-    }
-
-    case 'REJECT_ROUND': {
-      const round = state.currentRound
-      if (!round) return fail(state, 'NO_CURRENT_ROUND', 'There is no round to reject.')
-      if (round.status !== 'pending') {
-        return fail(state, 'NOT_PENDING', 'Only pending scores can be rejected.')
-      }
-      const reason = action.reason?.trim() ? action.reason.trim().slice(0, 200) : null
-      return ok({
-        ...state,
-        currentRound: {
-          ...round,
-          status: 'rejected',
-          rejection: { reason, at: action.at },
-          approvedAt: null,
-          autoApproved: false,
-        },
-      })
-    }
-
-    case 'FINALIZE_ROUND': {
-      const round = state.currentRound
-      if (!round) return fail(state, 'NO_CURRENT_ROUND', 'There is no round to finalize.')
-      if (round.status !== 'approved') {
-        return fail(
-          state,
-          'NOT_APPROVED',
-          'Approve the scores before finalizing. Incomplete or pending rounds cannot be finalized.',
-        )
-      }
-      if (!state.config) return fail(state, 'INVALID_PHASE', 'No active game.')
 
       if (round.kind === 'tie-break') {
-        return finalizeTieBreakRound(state, round, action.at)
+        return confirmTieBreakRound(state, round, action.at)
       }
 
       const { lines, penalties } = computeRoundScores({
@@ -602,10 +507,6 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
         winnerName: winner?.name ?? 'Unknown',
         lines,
         cutoff: state.config.cutoff,
-        mode: round.mode,
-        autoApproved: round.autoApproved,
-        submittedAt: round.submittedAt,
-        approvedAt: round.approvedAt,
         finalizedAt: action.at,
         eliminations,
         tieBreaks: [],
@@ -634,13 +535,8 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
     }
 
     case 'DISCARD_ROUND': {
-      const round = state.currentRound
-      if (!round) return fail(state, 'NO_CURRENT_ROUND', 'There is no round to discard.')
-      if (round.status === 'pending') {
-        return fail(state, 'NOT_PENDING', 'Reject the pending submission before discarding it.')
-      }
-      if (round.status === 'approved') {
-        return fail(state, 'ROUND_LOCKED', 'Approved scores cannot be discarded — finalize or end the game.')
+      if (!state.currentRound) {
+        return fail(state, 'NO_CURRENT_ROUND', 'There is no round to discard.')
       }
       return ok({ ...state, currentRound: null })
     }
@@ -747,7 +643,7 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
   }
 }
 
-function finalizeTieBreakRound(
+function confirmTieBreakRound(
   state: GameState,
   round: CurrentRound,
   at: number,

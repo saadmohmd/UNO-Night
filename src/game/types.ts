@@ -1,11 +1,8 @@
 import type { HandEntries, RemainingCards } from './cards'
 
-export type ApprovalMode = 'manual' | 'automatic'
-
 export interface GameConfig {
   name: string
   cutoff: number
-  approvalMode: ApprovalMode
   startedAt: number
 }
 
@@ -19,14 +16,11 @@ export interface PlayerRecord {
 }
 
 export type RoundKind = 'round' | 'tie-break'
-export type RoundStatus = 'draft' | 'pending' | 'rejected' | 'approved'
 
-export interface RoundRejection {
-  reason: string | null
-  at: number
-}
-
-/** The round currently being entered / reviewed / approved. */
+/**
+ * The round currently being recorded. It exists only while card counts are
+ * being entered; confirming it applies the scores and clears this object.
+ */
 export interface CurrentRound {
   id: string
   kind: RoundKind
@@ -35,12 +29,6 @@ export interface CurrentRound {
   participants: string[]
   entries: HandEntries
   winnerId: string | null
-  status: RoundStatus
-  mode: ApprovalMode
-  submittedAt: number | null
-  approvedAt: number | null
-  autoApproved: boolean
-  rejection: RoundRejection | null
   /** The tied group this round is resolving, when kind === 'tie-break'. */
   tieBreakPlayerIds: string[] | null
 }
@@ -101,10 +89,6 @@ export interface RoundRecord {
   winnerName: string
   lines: RoundScoreLine[]
   cutoff: number
-  mode: ApprovalMode
-  autoApproved: boolean
-  submittedAt: number | null
-  approvedAt: number | null
   finalizedAt: number
   eliminations: EliminationRecord[]
   tieBreaks: TieBreakRecord[]
@@ -162,6 +146,5 @@ export interface StartGamePayload {
   players: PlayerSeed[]
   name: string
   cutoff: number
-  approvalMode: ApprovalMode
   at: number
 }
