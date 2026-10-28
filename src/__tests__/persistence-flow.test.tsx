@@ -5,7 +5,6 @@ import App from '@/App'
 import { createInitialGameState, gameReducer, type GameAction } from '@/game/reducer'
 import { SAVED_GAME_KEY, SAVED_GAME_VERSION, saveGame } from '@/game/persistence'
 import type { GameState } from '@/game/types'
-import type { CardKey } from '@/game/cards'
 
 vi.setConfig({ testTimeout: 30000 })
 
@@ -33,14 +32,12 @@ function freshGame(cutoff = 40, names = ['Ana', 'Ben', 'Cara', 'Dev']): GameStat
 function playRound(
   state: GameState,
   winnerId: string,
-  hands: Record<string, Partial<Record<CardKey, number>>> = {},
+  penalties: Record<string, number> = {},
 ): GameState {
   let next = must(state, { type: 'SET_WINNER', playerId: winnerId })
   for (const id of next.currentRound?.participants ?? []) {
-    for (const [card, value] of Object.entries(hands[id] ?? {})) {
-      next = must(next, { type: 'SET_COUNT', playerId: id, card: card as CardKey, value })
-    }
-    next = must(next, { type: 'CONFIRM_HAND', playerId: id, confirmed: true })
+    if (id === winnerId) continue
+    next = must(next, { type: 'SET_PENALTY', playerId: id, penalty: penalties[id] ?? 0 })
   }
   return must(next, { type: 'CONFIRM_ROUND', at: 3000 })
 }
@@ -101,19 +98,16 @@ describe('writing the game to this device', () => {
     render(<App />)
     await fillSetup(user, ['Ana', 'Ben', 'Cara'], '200')
     await user.click(screen.getByRole('button', { name: /begin round/i }))
-    await screen.findByRole('heading', { name: /count the cards/i })
+    await screen.findByRole('heading', { name: /record the round/i })
 
-    const wild = screen.getByLabelText('Wild count for Ana')
-    await user.clear(wild)
-    await user.type(wild, '3')
+    const penalty = screen.getByLabelText('Penalty points for Ana')
+    await user.clear(penalty)
+    await user.type(penalty, '45')
 
     const game = storedGame()
     const first = game?.currentRound?.participants[0]
     expect(first).toBeDefined()
-    expect(first && game?.currentRound?.entries[first]).toMatchObject({
-      counts: expect.objectContaining({ wild: 3 }),
-      confirmed: false,
-    })
+    expect(first && game?.currentRound?.entries[first]).toEqual({ penalty: 45 })
   })
 
   it('deletes the saved copy when the game is discarded', async () => {
@@ -149,31 +143,36 @@ describe('restoring the game', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/saved game restored/i)
   })
 
-  it('restores an open round with its winner and card counts', async () => {
+  it('restores an open round with its winner and typed penalties', async () => {
     const user = userEvent.setup()
     const view = render(<App />)
     await fillSetup(user, ['Ana', 'Ben', 'Cara'], '200')
     await user.click(screen.getByRole('button', { name: /begin round/i }))
-    await screen.findByRole('heading', { name: /count the cards/i })
+    await screen.findByRole('heading', { name: /record the round/i })
 
-    await user.click(screen.getByRole('radio', { name: /ben wins the round/i }))
-    const wild = screen.getByLabelText('Wild count for Ana')
-    await user.clear(wild)
-    await user.type(wild, '2')
-    await user.click(screen.getByRole('button', { name: /confirm hand/i }))
+    await user.click(screen.getByRole('button', { name: /ben wins the round/i }))
+    const penalty = screen.getByLabelText('Penalty points for Ana')
+    await user.clear(penalty)
+    await user.type(penalty, '60')
 
     view.unmount()
     render(<App />)
 
-    expect(await screen.findByRole('heading', { name: /count the cards/i })).toBeInTheDocument()
-    expect(screen.getByRole('radio', { name: /ben wins the round/i })).toBeChecked()
-    expect(screen.getByLabelText('Wild count for Ana')).toHaveValue('2')
-    expect(screen.getByRole('button', { name: /review/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /record the round/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /ben wins the round/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(screen.getByLabelText('Penalty points for Ana')).toHaveValue('60')
+    // Ben is the winner, so his own field is locked at zero.
+    expect(screen.getByLabelText('Penalty points for Ben')).toBeDisabled()
+    expect(screen.getByLabelText('Penalty points for Ben')).toHaveValue('0')
+    expect(screen.getByRole('button', { name: /^confirm round$/i })).toBeInTheDocument()
   })
 
   it('restores cumulative scores and eliminations after a confirmed round', async () => {
     let game = must(freshGame(40), { type: 'BEGIN_ROUND', at: 2000 })
-    game = playRound(game, 'p1', { p2: { wild: 1 }, p3: { n5: 1 }, p4: { n2: 2 } })
+    game = playRound(game, 'p1', { p2: 40, p3: 5, p4: 4 })
     expect(game.players.find((player) => player.id === 'p2')?.eliminated).toBe(true)
     seedSavedGame(game)
 
@@ -192,7 +191,7 @@ describe('restoring the game', () => {
 
   it('restores a finished game on the final screen', async () => {
     let game = must(freshGame(500), { type: 'BEGIN_ROUND', at: 2000 })
-    game = playRound(game, 'p1', { p2: { n9: 1 }, p3: { n7: 1 }, p4: { n5: 1 } })
+    game = playRound(game, 'p1', { p2: 9, p3: 7, p4: 5 })
     game = must(game, { type: 'END_GAME', at: 4000, via: 'manual-end' })
     expect(game.phase).toBe('finished')
     seedSavedGame(game)
@@ -204,7 +203,7 @@ describe('restoring the game', () => {
 
   it('restores the two-player decision instead of dropping back to the dashboard', async () => {
     let game = must(freshGame(1, ['Ana', 'Ben', 'Cara']), { type: 'BEGIN_ROUND', at: 2000 })
-    game = playRound(game, 'p1', { p2: { skip: 1 } })
+    game = playRound(game, 'p1', { p2: 10 })
     expect(game.decision?.kind).toBe('insufficient-players')
     seedSavedGame(game)
 
@@ -246,7 +245,7 @@ describe('bad saved data', () => {
     const user = userEvent.setup()
     seedSavedGame(must(freshGame(), { type: 'BEGIN_ROUND', at: 2000 }))
     render(<App />)
-    await screen.findByRole('heading', { name: /count the cards/i })
+    await screen.findByRole('heading', { name: /record the round/i })
 
     await user.click(screen.getByRole('button', { name: /discard saved game/i }))
     const dialog = await screen.findByRole('dialog')
@@ -261,13 +260,13 @@ describe('bad saved data', () => {
     const user = userEvent.setup()
     seedSavedGame(must(freshGame(), { type: 'BEGIN_ROUND', at: 2000 }))
     render(<App />)
-    await screen.findByRole('heading', { name: /count the cards/i })
+    await screen.findByRole('heading', { name: /record the round/i })
 
     await user.click(screen.getByRole('button', { name: /discard saved game/i }))
     const dialog = await screen.findByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: /keep playing/i }))
 
-    expect(screen.getByRole('heading', { name: /count the cards/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /record the round/i })).toBeInTheDocument()
     expect(window.localStorage.getItem(SAVED_GAME_KEY)).not.toBeNull()
   })
 })

@@ -107,7 +107,7 @@ export function DashboardScreen({
         </h1>
         <p className="mt-3 max-w-lg text-[14px] leading-relaxed text-muted">
           {game.rounds.length === 0
-            ? 'Everyone starts at zero. Log remaining cards after each physical round; the top score at the cutoff is knocked out.'
+            ? 'Everyone starts at zero. Add each player’s penalty points after a physical round; the top score at the cutoff is knocked out.'
             : `${formatNumber(topScore)} is the highest score in play. Lowest cumulative score leads — the cutoff decides who goes home.`}
         </p>
 
@@ -254,10 +254,10 @@ export function DashboardScreen({
               <h2 className="text-[13px] font-semibold text-ink">How scoring works</h2>
             </div>
             <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
-              The round winner scores 0. Everyone else adds the points left in their
-              hand: 0–9 at face value, Skip & Reverse 10, Draw Two 20, Wild & Wild Draw
-              Four 40. When the top cumulative score reaches the cutoff after a
-              finalized round, that player is out.
+              The round winner scores 0. Everyone else adds the total points left in
+              their hand, counted the way your table counts them. When the top
+              cumulative score reaches the cutoff after a finalized round, that player
+              is out.
             </p>
           </section>
         )}

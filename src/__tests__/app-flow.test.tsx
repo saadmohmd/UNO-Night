@@ -34,30 +34,25 @@ async function startGame(
 
 async function beginRound(user: User) {
   await user.click(screen.getByRole('button', { name: /begin round/i }))
-  await screen.findByRole('heading', { name: /count the cards/i })
+  await screen.findByRole('heading', { name: /record the round/i })
 }
 
 async function selectWinner(user: User, name: string) {
-  await user.click(screen.getByRole('radio', { name: `${name} wins the round` }))
+  await user.click(screen.getByRole('button', { name: `${name} wins the round` }))
 }
 
-async function confirmOpenHand(
-  user: User,
-  card?: { label: string; value: string },
-) {
-  if (card) {
-    const input = screen.getByLabelText(card.label)
-    await user.clear(input)
-    await user.type(input, card.value)
-  }
-  await user.click(screen.getByRole('button', { name: /confirm hand/i }))
+/** Types one player's penalty points. Empty input clears the field. */
+async function enterPenalty(user: User, name: string, value: string) {
+  const input = screen.getByLabelText(`Penalty points for ${name}`)
+  await user.clear(input)
+  if (value) await user.type(input, value)
 }
 
-/** Opens the review sheet and confirms the round in one step. */
-async function reviewAndConfirm(user: User) {
-  await user.click(screen.getByRole('button', { name: 'Review' }))
-  const review = await screen.findByRole('dialog')
-  await user.click(within(review).getByRole('button', { name: /confirm round/i }))
+/** Opens the confirmation sheet and confirms the round in one step. */
+async function confirmRound(user: User) {
+  await user.click(screen.getByRole('button', { name: /^confirm round$/i }))
+  const dialog = await screen.findByRole('dialog')
+  await user.click(within(dialog).getByRole('button', { name: /^confirm round$/i }))
 }
 
 describe('UNO Night app flow', () => {
@@ -111,20 +106,19 @@ describe('UNO Night app flow', () => {
     await beginRound(user)
 
     await selectWinner(user, 'Ana')
-    await confirmOpenHand(user)
-    await confirmOpenHand(user, { label: 'Wild count for Ben', value: '2' })
-    await confirmOpenHand(user)
+    await enterPenalty(user, 'Ben', '80')
+    await enterPenalty(user, 'Cara', '0')
 
-    await user.click(screen.getByRole('button', { name: 'Review' }))
+    await user.click(screen.getByRole('button', { name: /^confirm round$/i }))
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByRole('heading', { name: /review round 1/i })).toBeInTheDocument()
+    expect(within(dialog).getByRole('heading', { name: /confirm round 1/i })).toBeInTheDocument()
+    expect(within(dialog).getByText(/80 points are added/i)).toBeInTheDocument()
+    expect(within(dialog).getByText(/cannot be undone/i)).toBeInTheDocument()
+    // The sheet recaps every line that is about to be committed.
     expect(within(dialog).getByText('+80')).toBeInTheDocument()
-    expect(within(dialog).getByText(/winner — penalty locked at 0/i)).toBeInTheDocument()
-    expect(
-      within(dialog).getByText(/confirming is final — the round cannot be edited afterwards/i),
-    ).toBeInTheDocument()
+    expect(within(dialog).getByText('winner')).toBeInTheDocument()
 
-    await user.click(within(dialog).getByRole('button', { name: /confirm round/i }))
+    await user.click(within(dialog).getByRole('button', { name: /^confirm round$/i }))
 
     expect(
       await screen.findByRole('heading', { name: /ana takes the round/i }),
@@ -144,11 +138,10 @@ describe('UNO Night app flow', () => {
     await startGame(user)
     await beginRound(user)
     await selectWinner(user, 'Ana')
-    await confirmOpenHand(user)
-    await confirmOpenHand(user, { label: 'Skip count for Ben', value: '1' })
-    await confirmOpenHand(user)
+    await enterPenalty(user, 'Ben', '10')
+    await enterPenalty(user, 'Cara', '0')
 
-    await reviewAndConfirm(user)
+    await confirmRound(user)
 
     expect(
       await screen.findByRole('heading', { name: /ana takes the round/i }),
@@ -168,12 +161,11 @@ describe('UNO Night app flow', () => {
     await startGame(user, { names: ['Ana', 'Ben', 'Cara', 'Dev'], cutoff: '1' })
     await beginRound(user)
     await selectWinner(user, 'Ana')
-    await confirmOpenHand(user)
-    await confirmOpenHand(user, { label: 'Wild count for Ben', value: '1' })
-    await confirmOpenHand(user, { label: 'Wild count for Cara', value: '1' })
-    await confirmOpenHand(user)
+    await enterPenalty(user, 'Ben', '40')
+    await enterPenalty(user, 'Cara', '40')
+    await enterPenalty(user, 'Dev', '0')
 
-    await reviewAndConfirm(user)
+    await confirmRound(user)
 
     expect(
       await screen.findByRole('heading', { name: /too close to call/i }),
@@ -195,11 +187,10 @@ describe('UNO Night app flow', () => {
     await startGame(user, { cutoff: '1' })
     await beginRound(user)
     await selectWinner(user, 'Ana')
-    await confirmOpenHand(user)
-    await confirmOpenHand(user, { label: 'Skip count for Ben', value: '1' })
-    await confirmOpenHand(user, { label: 'Number 5 count for Cara', value: '1' })
+    await enterPenalty(user, 'Ben', '10')
+    await enterPenalty(user, 'Cara', '5')
 
-    await reviewAndConfirm(user)
+    await confirmRound(user)
 
     expect(
       await screen.findByRole('heading', { name: /two players remain/i }),
@@ -223,36 +214,116 @@ describe('UNO Night app flow', () => {
     await screen.findByRole('heading', { name: /set up the table/i })
   })
 
-  it('blocks review until every hand is confirmed', async () => {
+  it('blocks confirmation until the winner and every penalty are entered', async () => {
     const user = userEvent.setup()
     await startGame(user)
     await beginRound(user)
-    await selectWinner(user, 'Ana')
-    await confirmOpenHand(user)
-    expect(screen.getByRole('button', { name: 'Review' })).toBeDisabled()
-    expect(screen.getAllByText(/2 hands left to confirm/i).length).toBeGreaterThan(0)
 
-    await user.click(screen.getByRole('button', { name: /review/i }))
+    // No winner yet, so the fields stay closed and the action is unavailable.
+    expect(screen.getByRole('button', { name: /^confirm round$/i })).toBeDisabled()
+    expect(screen.getAllByText(/pick the round winner/i).length).toBeGreaterThan(0)
+    await user.click(screen.getByRole('button', { name: /^confirm round$/i }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
-    // Counts cannot go below zero through the stepper.
-    const minus = screen.getByRole('button', {
-      name: /remove one wild from ben/i,
-    })
-    expect(minus).toBeDisabled()
-    const plus = screen.getByRole('button', { name: /add one wild to ben/i })
-    await user.click(plus)
-    expect(screen.getByLabelText('Wild count for Ben')).toHaveValue('1')
+    await selectWinner(user, 'Ana')
+    expect(screen.getByRole('button', { name: /^confirm round$/i })).toBeDisabled()
+    expect(screen.getAllByText(/2 penalties still to enter/i).length).toBeGreaterThan(0)
 
-    // Invalid direct entry is flagged and never committed as a negative count.
-    const wildInput = screen.getByLabelText('Wild count for Ben')
-    await user.clear(wildInput)
-    await user.type(wildInput, '-2')
-    expect(await screen.findByText(/cannot be negative/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /remove one wild from ben/i })).toBeDisabled()
-    await user.tab()
-    expect(wildInput).toHaveValue('0')
-    expect(screen.queryByText(/cannot be negative/i)).not.toBeInTheDocument()
+    await enterPenalty(user, 'Ben', '25')
+    expect(screen.getByRole('button', { name: /^confirm round$/i })).toBeDisabled()
+    expect(screen.getAllByText(/1 penalty still to enter/i).length).toBeGreaterThan(0)
+
+    await enterPenalty(user, 'Cara', '0')
+    expect(screen.getByRole('button', { name: /^confirm round$/i })).toBeEnabled()
+    expect(screen.getAllByText(/ready — confirm the round/i).length).toBeGreaterThan(0)
+
+    // Only digits can be entered, so negatives and decimals are impossible.
+    await enterPenalty(user, 'Ben', '')
+    await user.type(screen.getByLabelText('Penalty points for Ben'), '-1.5')
+    expect(screen.getByLabelText('Penalty points for Ben')).toHaveValue('15')
+    expect(screen.getByRole('button', { name: /^confirm round$/i })).toBeEnabled()
+
+    // Clearing a field makes the round incomplete again.
+    await enterPenalty(user, 'Ben', '')
+    expect(screen.getByLabelText('Penalty points for Ben')).toHaveValue('')
+    expect(screen.getByRole('button', { name: /^confirm round$/i })).toBeDisabled()
+  })
+
+  it('shows no card-by-card controls anywhere in the entry screen', async () => {
+    const user = userEvent.setup()
+    await startGame(user)
+    await beginRound(user)
+
+    // The old per-card sections are gone for good.
+    expect(screen.queryByText(/number cards/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/action cards/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/wild cards/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/draw two/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/confirm hand/i)).not.toBeInTheDocument()
+
+    // Every participant has one plain penalty field, and one winner button.
+    for (const name of ['Ana', 'Ben', 'Cara']) {
+      expect(screen.getByLabelText(`Penalty points for ${name}`)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: `${name} wins the round` })).toBeInTheDocument()
+    }
+    expect(screen.getAllByRole('button', { name: /wins the round$/ })).toHaveLength(3)
+  })
+
+  it('locks the winner at zero and frees the previous winner when the pick changes', async () => {
+    const user = userEvent.setup()
+    await startGame(user)
+    await beginRound(user)
+
+    await selectWinner(user, 'Ana')
+    const ana = screen.getByLabelText('Penalty points for Ana')
+    expect(ana).toBeDisabled()
+    expect(ana).toHaveValue('0')
+    expect(screen.getByLabelText('Penalty points for Ben')).toBeEnabled()
+
+    await enterPenalty(user, 'Ben', '30')
+    expect(screen.getByLabelText('Penalty points for Ben')).toHaveValue('30')
+
+    // Ana is no longer the winner: her field reopens, Ben's locks at zero.
+    await selectWinner(user, 'Ben')
+    expect(screen.getByLabelText('Penalty points for Ana')).toBeEnabled()
+    expect(screen.getByLabelText('Penalty points for Ana')).toHaveValue('')
+    expect(screen.getByLabelText('Penalty points for Ben')).toBeDisabled()
+    expect(screen.getByLabelText('Penalty points for Ben')).toHaveValue('0')
+
+    await enterPenalty(user, 'Ana', '15')
+    await enterPenalty(user, 'Cara', '5')
+
+    const summary = screen.getByRole('region', { name: /summary/i })
+    expect(within(summary).getByText('+15')).toBeInTheDocument()
+    expect(within(summary).getByText('+0')).toBeInTheDocument()
+    expect(screen.getByText(/3 players · 20 pts/i)).toBeInTheDocument()
+  })
+
+  it('adds the typed penalties to the cumulative scores exactly once', async () => {
+    const user = userEvent.setup()
+    await startGame(user, { cutoff: '500' })
+    await beginRound(user)
+    await selectWinner(user, 'Ana')
+    await enterPenalty(user, 'Ben', '25')
+    await enterPenalty(user, 'Cara', '10')
+
+    // The summary previews the resulting totals before anything is committed.
+    const summary = screen.getByRole('region', { name: /summary/i })
+    expect(within(summary).getByText('25')).toBeInTheDocument()
+    expect(within(summary).getByText('10')).toBeInTheDocument()
+
+    await confirmRound(user)
+    await screen.findByRole('heading', { name: /ana takes the round/i })
+    expect(screen.getByText(/35 points across the rest/i)).toBeInTheDocument()
+
+    // A second confirmation attempt is impossible: the round is no longer open.
+    expect(screen.queryByRole('button', { name: /^confirm round$/i })).not.toBeInTheDocument()
+
+    let saved = JSON.parse(window.localStorage.getItem('uno-night:game') as string) as {
+      game: { players: { name: string; cumulativeScore: number }[] }
+    }
+    expect(saved.game.players.map((player) => player.cumulativeScore)).toEqual([0, 25, 10])
+    expect(saved.game.players.map((player) => player.name)).toEqual(['Ana', 'Ben', 'Cara'])
   })
 
   it('prevents a second round from starting while a round is open', async () => {
@@ -262,7 +333,7 @@ describe('UNO Night app flow', () => {
     await user.click(screen.getByRole('button', { name: 'Game menu' }))
     await user.click(await screen.findByRole('menuitem', { name: /dashboard/i }))
     // The in-progress round owns the screen, so the dashboard never shows.
-    expect(screen.getByRole('heading', { name: /count the cards/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /record the round/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /begin round/i })).not.toBeInTheDocument()
   })
 
@@ -271,7 +342,7 @@ describe('UNO Night app flow', () => {
     await startGame(user)
     await beginRound(user)
     await selectWinner(user, 'Ben')
-    await confirmOpenHand(user, { label: 'Wild count for Ana', value: '3' })
+    await enterPenalty(user, 'Ana', '120')
     await user.click(screen.getByRole('button', { name: /discard/i }))
     const dialog = await screen.findByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: /discard entry/i }))
@@ -286,11 +357,10 @@ describe('UNO Night app flow', () => {
     await startGame(user, { cutoff: '500' })
     await beginRound(user)
     await selectWinner(user, 'Ana')
-    await confirmOpenHand(user)
-    await confirmOpenHand(user)
-    await confirmOpenHand(user, { label: 'Number 4 count for Cara', value: '1' })
+    await enterPenalty(user, 'Ben', '0')
+    await enterPenalty(user, 'Cara', '4')
 
-    await reviewAndConfirm(user)
+    await confirmRound(user)
     await screen.findByRole('heading', { name: /ana takes the round/i })
 
     await user.click(screen.getByRole('button', { name: 'Game menu' }))

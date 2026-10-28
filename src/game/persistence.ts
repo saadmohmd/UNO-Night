@@ -12,12 +12,17 @@
  *  - Loading trusts nothing. Saved data is re-validated field by field, version
  *    checked and rejected (then deleted) if it is damaged or from another build.
  *
- * Only gameplay data is stored: display names, card counts, scores, eliminations
- * and the timestamps the scoreboard already shows. Nothing is sent anywhere.
+ * Only gameplay data is stored: display names, round penalties, scores,
+ * eliminations and the timestamps the scoreboard already shows. Nothing is sent
+ * anywhere.
+ *
+ * Saves written before penalties were typed in directly stored per-card counts.
+ * Those are migrated on load (see `migrateLegacyGame`) so an open game keeps the
+ * exact scores it already had.
  */
 
-import { CARD_KEYS, emptyRemainingCards, type HandEntries, type RemainingCards } from './cards'
-import { MAX_CARD_COUNT, MAX_NAME_LENGTH, MAX_PLAYERS, MIN_PLAYERS, validateCutoff } from './validation'
+import { legacyPenalty } from './legacy'
+import { MAX_NAME_LENGTH, MAX_PENALTY, MAX_PLAYERS, MIN_PLAYERS, validateCutoff } from './validation'
 import type {
   CurrentRound,
   DecisionState,
@@ -28,6 +33,7 @@ import type {
   GameState,
   GameTransfer,
   PlayerRecord,
+  RoundEntries,
   RoundKind,
   RoundOutcome,
   RoundRecord,
@@ -38,7 +44,7 @@ import type {
 } from './types'
 
 export const SAVED_GAME_KEY = 'uno-night:game'
-export const SAVED_GAME_VERSION = 1
+export const SAVED_GAME_VERSION = 2
 
 /** Anything larger than this is not a genuine save; refuse to parse it. */
 const MAX_SAVED_CHARS = 512 * 1024
@@ -157,27 +163,20 @@ const ELIMINATION_VIA: readonly EliminationVia[] = ['cutoff', 'tie-break-replay'
 const ENDING_VIA = ['last-standing', 'controller-end', 'manual-end', 'declared'] as const
 const ENDING_KIND = ['champion', 'unresolved'] as const
 
-function parseCounts(value: unknown, field: string): RemainingCards {
-  const source = record(value, field)
-  const counts = emptyRemainingCards()
-  for (const key of CARD_KEYS) {
-    counts[key] = integer(source[key], `${field}.${key}`, { min: 0, max: MAX_CARD_COUNT })
-  }
-  return counts
-}
-
 function parsePlayerId(value: unknown, field: string): string {
   return text(value, field, { max: MAX_ID_LENGTH })
 }
 
-function parseEntries(value: unknown, participants: string[]): HandEntries {
+function parseEntries(value: unknown, participants: string[]): RoundEntries {
   const source = record(value, 'round entries')
-  const entries: HandEntries = {}
+  const entries: RoundEntries = {}
   for (const id of participants) {
     const entry = record(source[id], 'round entry')
     entries[id] = {
-      counts: parseCounts(entry.counts, 'hand counts'),
-      confirmed: bool(entry.confirmed, 'hand confirmation'),
+      // `null` is a field the operator has not filled in yet.
+      penalty: maybe(entry.penalty, (item) =>
+        integer(item, 'round penalty', { min: 0, max: MAX_PENALTY }),
+      ),
     }
   }
   for (const key of Object.keys(source)) {
@@ -227,8 +226,6 @@ function parseScoreLine(value: unknown, knownIds: Set<string>): RoundScoreLine {
   return {
     playerId,
     name: text(source.name, 'score line name', { max: MAX_NAME_LENGTH }),
-    counts: parseCounts(source.counts, 'score line counts'),
-    totalCards: integer(source.totalCards, 'score line card total', { max: 10_000 }),
     penalty: integer(source.penalty, 'score line penalty', { max: 1_000_000 }),
     previousTotal: integer(source.previousTotal, 'score line previous total', { max: 10_000_000 }),
     newTotal: integer(source.newTotal, 'score line new total', { max: 10_000_000 }),
@@ -253,9 +250,7 @@ function parseElimination(value: unknown, knownIds: Set<string>): EliminationRec
 function parseTieBreakHand(value: unknown): TieBreakHand {
   const source = record(value, 'tie-break hand')
   return {
-    counts: parseCounts(source.counts, 'tie-break counts'),
-    totalCards: integer(source.totalCards, 'tie-break card total', { max: 10_000 }),
-    penalty: integer(source.penalty, 'tie-break penalty', { max: 1_000_000 }),
+    penalty: integer(source.penalty, 'tie-break penalty', { min: 0, max: MAX_PENALTY }),
   }
 }
 
@@ -473,15 +468,80 @@ export function parseGameState(value: unknown): GameState {
   return game
 }
 
+/**
+ * Rewrites a version-1 game into the current shape.
+ *
+ * Version 1 recorded a counter per card type and derived the penalty from UNO's
+ * card values. A finished round already carried its penalty, so only the open
+ * round needs arithmetic; the frozen legacy table does that conversion once.
+ * Anything malformed is left in place for `parseGameState` to reject.
+ */
+export function migrateLegacyGame(value: unknown): unknown {
+  if (!isObject(value)) return value
+  const game: Record<string, unknown> = { ...value }
+
+  if (Array.isArray(game.rounds)) {
+    game.rounds = game.rounds.map((round) => {
+      if (!isObject(round)) return round
+      const next: Record<string, unknown> = { ...round }
+      if (Array.isArray(round.lines)) {
+        next.lines = round.lines.map((line) => {
+          if (!isObject(line)) return line
+          const { counts: _counts, totalCards: _totalCards, ...rest } = line
+          return rest
+        })
+      }
+      if (Array.isArray(round.tieBreaks)) {
+        next.tieBreaks = round.tieBreaks.map((tieBreak) => {
+          if (!isObject(tieBreak)) return tieBreak
+          const migrated: Record<string, unknown> = { ...tieBreak }
+          if (isObject(tieBreak.hands)) {
+            const hands: Record<string, { penalty: number | null }> = {}
+            for (const [id, hand] of Object.entries(tieBreak.hands)) {
+              hands[id] = {
+                penalty: isObject(hand)
+                  ? typeof hand.penalty === 'number'
+                    ? hand.penalty
+                    : legacyPenalty(hand.counts)
+                  : null,
+              }
+            }
+            migrated.hands = hands
+          }
+          return migrated
+        })
+      }
+      return next
+    })
+  }
+
+  if (isObject(game.currentRound) && isObject(game.currentRound.entries)) {
+    const entries: Record<string, { penalty: number | null }> = {}
+    for (const [id, entry] of Object.entries(game.currentRound.entries)) {
+      entries[id] = {
+        penalty: isObject(entry) ? legacyPenalty(entry.counts) : null,
+      }
+    }
+    game.currentRound = { ...game.currentRound, entries }
+  }
+
+  return game
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 /** Validates and normalises a raw parsed record. Throws `CorruptSave` when unusable. */
 export function parseSavedGame(value: unknown): { game: GameState; savedAt: number } {
   const source = record(value, 'saved game')
   const version = integer(source.version, 'save version', { min: 0, max: 1000 })
-  if (version !== SAVED_GAME_VERSION) {
+  if (version > SAVED_GAME_VERSION) {
     throw new OutdatedSave(`save version ${version}`)
   }
   const savedAt = integer(source.savedAt, 'save time', { min: 0, max: 9_999_999_999_999 })
-  return { game: parseGameState(source.game), savedAt }
+  const game = version === SAVED_GAME_VERSION ? source.game : migrateLegacyGame(source.game)
+  return { game: parseGameState(game), savedAt }
 }
 
 /**

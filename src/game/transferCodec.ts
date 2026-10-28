@@ -1,11 +1,11 @@
 /**
  * Compact projection of {@link GameState} for QR transfer.
  *
- * `JSON.stringify(game)` is far too fat for a QR code: every hand stores 15
- * named counters and every player id is repeated in entries, score lines and
- * eliminations. This module projects the game into short keys, positional
- * player references and sparse card counts, which typically shrinks a transfer
- * by 4–6× before compression.
+ * `JSON.stringify(game)` is far too fat for a QR code: every player id is
+ * repeated in entries, score lines and eliminations, and every key is a full
+ * word. This module projects the game into short keys and positional player
+ * references, which typically shrinks a transfer by several times before
+ * compression.
  *
  * Two rules keep it safe:
  *  - Nothing derived by the engine is thrown away: penalties, cumulative totals,
@@ -14,11 +14,15 @@
  *  - Names of players and rounds *are* rebuilt from their owner records, because
  *    they are copies of those records rather than independent values.
  *
+ * Version 1 codes (sent before penalties were typed in directly) are still
+ * accepted: their per-card counters are converted once with the frozen legacy
+ * table, so an in-flight handover does not lose the round it was carrying.
+ *
  * Unpacking returns a plain object in {@link GameState} shape. Callers must run
  * it through the persistence validator (`parseGameState`) before using it.
  */
 
-import { CARD_KEYS, emptyRemainingCards, totalCards, type CardKey, type RemainingCards } from './cards'
+import { legacyPenalty } from './legacy'
 import type {
   CurrentRound,
   DecisionState,
@@ -35,36 +39,10 @@ import type {
   TieBreakState,
 } from './types'
 
-export const PACKED_VERSION = 1
+export const PACKED_VERSION = 2
 
 /** Thrown when a packed game does not have the expected shape. */
 export class PackedGameError extends Error {}
-
-const CARD_CODES: Record<CardKey, string> = {
-  n0: '0',
-  n1: '1',
-  n2: '2',
-  n3: '3',
-  n4: '4',
-  n5: '5',
-  n6: '6',
-  n7: '7',
-  n8: '8',
-  n9: '9',
-  skip: 's',
-  reverse: 'r',
-  draw2: 'd',
-  wild: 'w',
-  wild4: 'W',
-}
-
-const CODE_CARDS = Object.entries(CARD_CODES).reduce<Record<string, CardKey>>(
-  (acc, [card, code]) => {
-    acc[code] = card as CardKey
-    return acc
-  },
-  {},
-)
 
 const OUTCOME_CODES: Record<RoundOutcome, string> = {
   continue: 'c',
@@ -153,27 +131,11 @@ function asCode<T>(value: unknown, field: string, table: Record<string, T>): T {
 
 /* --------------------------------------------------------------- primitives */
 
-/** Sparse `card=count` list; empty hands become an empty string. */
-export function packCounts(counts: RemainingCards): string {
-  return CARD_KEYS.filter((key) => counts[key] > 0)
-    .map((key) => `${CARD_CODES[key]}=${counts[key]}`)
-    .join(',')
-}
-
-export function unpackCounts(value: unknown): RemainingCards {
-  const counts = emptyRemainingCards()
-  const text = asText(value, 'card counts')
-  if (text.length === 0) return counts
-  for (const pair of text.split(',')) {
-    const [code, raw] = pair.split('=')
-    const card = CODE_CARDS[code]
-    if (!card) fail(`unknown card "${code}"`)
-    const count = Number(raw)
-    if (!Number.isInteger(count) || count < 0 || count > 99) fail('a card count is invalid')
-    if (card in counts && counts[card] > 0) fail('a card is counted twice')
-    counts[card] = count
-  }
-  return counts
+/** Legacy (format 1) per-card counters → the penalty they used to represent. */
+function legacyEntryPenalty(value: unknown, field: string): number | null {
+  const penalty = legacyPenalty(value)
+  if (penalty === null) fail(`${field} is not a valid card record`)
+  return penalty
 }
 
 /** `[name, score, eliminated, eliminatedAtRound, eliminationOrder]` */
@@ -220,7 +182,6 @@ export function packGame(game: GameState): PackedGame {
 
   const packLine = (line: RoundScoreLine) => ({
     p: indexOf(line.playerId),
-    c: packCounts(line.counts),
     n: line.penalty,
     o: line.previousTotal,
     t: line.newTotal,
@@ -245,7 +206,7 @@ export function packGame(game: GameState): PackedGame {
         : record.playerIds.map((playerId) => {
             const hand = (record.hands as Record<string, TieBreakHand>)[playerId]
             if (!hand) fail('a tie-break hand is missing')
-            return [packCounts(hand.counts), hand.penalty]
+            return hand.penalty
           }),
     e: record.eliminatedPlayerId === null ? null : indexOf(record.eliminatedPlayerId),
     x: record.note,
@@ -270,8 +231,8 @@ export function packGame(game: GameState): PackedGame {
     p: round.participants.map(indexOf),
     e: round.participants.map((playerId) => {
       const entry = round.entries[playerId]
-      if (!entry) fail('a hand entry is missing')
-      return [packCounts(entry.counts), entry.confirmed ? 1 : 0]
+      if (!entry) fail('a round entry is missing')
+      return entry.penalty
     }),
     w: round.winnerId === null ? null : indexOf(round.winnerId),
     tb: round.tieBreakPlayerIds === null ? null : round.tieBreakPlayerIds.map(indexOf),
@@ -327,7 +288,10 @@ export function packGame(game: GameState): PackedGame {
 export function unpackGame(value: unknown): unknown {
   const packed = asRecord(value, 'transfer')
   const version = asNumber(packed.v, 'transfer version')
-  if (version !== PACKED_VERSION) fail('the transfer uses an unsupported format')
+  if (version !== PACKED_VERSION && version !== 1) {
+    fail('the transfer uses an unsupported format')
+  }
+  const legacy = version === 1
 
   const g = asRecord(packed.g, 'game')
   const phaseCode = asCode(g.p, 'game phase', { a: 'active', f: 'finished' } as const)
@@ -344,15 +308,12 @@ export function unpackGame(value: unknown): unknown {
 
   const unpackLine = (value: unknown): RoundScoreLine => {
     const line = asRecord(value, 'score line')
-    const counts = unpackCounts(line.c)
     const playerIndex = asIndex(line.p, 'score line player', playerCount)
     const winnerFlag = asNumber(line.w, 'score line winner')
     if (winnerFlag !== 0 && winnerFlag !== 1) fail('a score line winner flag is invalid')
     return {
       playerId: idOf(playerIndex),
       name: nameOf(playerIndex),
-      counts,
-      totalCards: totalCards(counts),
       penalty: asNumber(line.n, 'score line penalty'),
       previousTotal: asNumber(line.o, 'score line previous total'),
       newTotal: asNumber(line.t, 'score line new total'),
@@ -387,14 +348,13 @@ export function unpackGame(value: unknown): unknown {
       if (tuples.length !== playerIds.length) fail('a tie-break hand list does not match its players')
       hands = {}
       tuples.forEach((entry, index) => {
+        if (typeof entry === 'number' || entry === null) {
+          hands![playerIds[index]] = { penalty: asNumber(entry, 'tie-break penalty') }
+          return
+        }
         const tuple = asArray(entry, 'tie-break hand')
         if (tuple.length !== 2) fail('a tie-break hand is incomplete')
-        const counts = unpackCounts(tuple[0])
-        hands![playerIds[index]] = {
-          counts,
-          totalCards: totalCards(counts),
-          penalty: asNumber(tuple[1], 'tie-break penalty'),
-        }
+        hands![playerIds[index]] = { penalty: asNumber(tuple[1], 'tie-break penalty') }
       })
     }
     return {
@@ -439,15 +399,19 @@ export function unpackGame(value: unknown): unknown {
     const participants = asArray(round.p, 'open round players').map((entry) =>
       idOf(asIndex(entry, 'open round player', playerCount)),
     )
-    const entryTuples = asArray(round.e, 'open round hands')
-    if (entryTuples.length !== participants.length) fail('an open round is missing hand entries')
+    const entryValues = asArray(round.e, 'open round entries')
+    if (entryValues.length !== participants.length) fail('an open round is missing entries')
     const entries: CurrentRound['entries'] = {}
     participants.forEach((playerId, index) => {
-      const tuple = asArray(entryTuples[index], 'open round hand')
-      if (tuple.length !== 2) fail('an open round hand is incomplete')
-      const confirmed = asNumber(tuple[1], 'hand confirmation')
-      if (confirmed !== 0 && confirmed !== 1) fail('a hand confirmation flag is invalid')
-      entries[playerId] = { counts: unpackCounts(tuple[0]), confirmed: confirmed === 1 }
+      const value = entryValues[index]
+      if (value === null) {
+        entries[playerId] = { penalty: null }
+        return
+      }
+      // Format 1 stored `[counts, confirmed]`; format 2 stores the penalty.
+      entries[playerId] = legacy
+        ? { penalty: legacyEntryPenalty(asArray(value, 'open round hand')[0], 'open round hand') }
+        : { penalty: asNumber(value, 'open round penalty') }
     })
     const winnerIndex = asNullableIndex(round.w, 'open round winner', playerCount)
     const roundNumber = asNumber(round.n, 'open round number')

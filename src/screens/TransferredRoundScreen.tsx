@@ -36,7 +36,12 @@ export function TransferredRoundScreen({
   const isTieBreak = round.kind === 'tie-break'
   const preview = scorePreview(game, round)
   const totalPenalty = preview.lines.reduce((sum, line) => sum + line.penalty, 0)
-  const confirmedCount = participants.filter((player) => round.entries[player.id]?.confirmed).length
+  const enteredCount = round.winnerId
+    ? participants.filter(
+        (player) =>
+          player.id === round.winnerId || round.entries[player.id]?.penalty != null,
+      ).length
+    : participants.filter((player) => round.entries[player.id]?.penalty != null).length
   const winner = participants.find((player) => player.id === round.winnerId)
 
   return (
@@ -74,17 +79,17 @@ export function TransferredRoundScreen({
           </div>
           <div className="rounded-xl border border-line bg-surface/60 px-3.5 py-3">
             <p className="text-[10px] font-semibold tracking-wide text-faint uppercase">
-              Hands confirmed
+              Penalties entered
             </p>
             <p className="mt-0.5 text-sm font-medium text-ink tabular-nums">
-              {confirmedCount} / {participants.length}
+              {enteredCount} / {participants.length}
             </p>
           </div>
         </div>
 
         <div className="mt-4 flex items-center justify-between rounded-xl border border-line bg-bg-soft/60 px-4 py-3">
           <span className="text-[11px] font-semibold tracking-wide text-muted uppercase">
-            Unconfirmed penalty
+            Round penalty so far
           </span>
           <span className="font-display text-lg font-semibold text-ink tabular-nums">
             {formatNumber(totalPenalty)} pts
@@ -97,7 +102,6 @@ export function TransferredRoundScreen({
               key={line.playerId}
               name={line.name}
               index={game.players.findIndex((player) => player.id === line.playerId)}
-              counts={line.counts}
               penalty={line.penalty}
               previousTotal={line.previousTotal}
               newTotal={line.newTotal}

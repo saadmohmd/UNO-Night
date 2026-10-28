@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CardKey } from '../cards'
 import { createInitialGameState, gameReducer, type GameAction } from '../reducer'
 import {
   SAVED_GAME_KEY,
@@ -41,14 +40,12 @@ function begin(state: GameState): GameState {
 function enterRound(
   state: GameState,
   winnerId: string,
-  hands: Record<string, Partial<Record<CardKey, number>>> = {},
+  penalties: Record<string, number> = {},
 ): GameState {
   let next = must(state, { type: 'SET_WINNER', playerId: winnerId })
   for (const id of next.currentRound?.participants ?? []) {
-    for (const [card, value] of Object.entries(hands[id] ?? {})) {
-      next = must(next, { type: 'SET_COUNT', playerId: id, card: card as CardKey, value: value as number })
-    }
-    next = must(next, { type: 'CONFIRM_HAND', playerId: id, confirmed: true })
+    if (id === winnerId) continue
+    next = must(next, { type: 'SET_PENALTY', playerId: id, penalty: penalties[id] ?? 0 })
   }
   return next
 }
@@ -56,9 +53,9 @@ function enterRound(
 function playRound(
   state: GameState,
   winnerId: string,
-  hands: Record<string, Partial<Record<CardKey, number>>> = {},
+  penalties: Record<string, number> = {},
 ): GameState {
-  return must(enterRound(state, winnerId, hands), { type: 'CONFIRM_ROUND', at: now() })
+  return must(enterRound(state, winnerId, penalties), { type: 'CONFIRM_ROUND', at: now() })
 }
 
 /** Minimal in-memory stand-in for localStorage. */
@@ -109,16 +106,17 @@ describe('saving and loading', () => {
     expect(loaded.game).toEqual(game)
   })
 
-  it('round-trips an open round with card counts, winner and confirmations', () => {
+  it('round-trips an open round with its typed-in penalties and winner', () => {
     const storage = memoryStorage()
-    const game = enterRound(begin(startGame()), 'p1', { p2: { wild: 2 }, p4: { n5: 1 } })
+    const game = enterRound(begin(startGame()), 'p1', { p2: 80, p4: 5 })
     saveGame(game, { storage })
 
     const loaded = loadSavedGame(storage)
     expect(loaded.status).toBe('restored')
     if (loaded.status !== 'restored') return
     expect(loaded.game.currentRound).toEqual(game.currentRound)
-    expect(loaded.game.currentRound?.entries.p2).toEqual({ counts: expect.objectContaining({ wild: 2 }), confirmed: true })
+    expect(loaded.game.currentRound?.entries.p2).toEqual({ penalty: 80 })
+    expect(loaded.game.currentRound?.entries.p3).toEqual({ penalty: 0 })
     expect(loaded.game.currentRound?.winnerId).toBe('p1')
     expect(loaded.game.players.map((player) => player.cumulativeScore)).toEqual([0, 0, 0, 0])
   })
@@ -128,7 +126,7 @@ describe('saving and loading', () => {
     // Ana wins, Ben and Cara tie at the 40 cutoff -> tie-break, then a manual call eliminates Cara.
     let game = startGame()
     game = must(game, { type: 'BEGIN_ROUND', at: now() })
-    game = playRound(game, 'p1', { p2: { wild: 1 }, p3: { wild: 1 }, p4: { n5: 1 } })
+    game = playRound(game, 'p1', { p2: 40, p3: 40, p4: 5 })
     expect(game.tieBreak?.playerIds).toEqual(['p2', 'p3'])
     game = must(game, {
       type: 'RESOLVE_TIE_BREAK_MANUAL',
@@ -152,7 +150,7 @@ describe('saving and loading', () => {
     const storage = memoryStorage()
     let game = startGame(['Ana', 'Ben', 'Cara'], 1000)
     game = must(game, { type: 'BEGIN_ROUND', at: now() })
-    game = playRound(game, 'p1', { p2: { n1: 1 } })
+    game = playRound(game, 'p1', { p2: 1 })
     game = must(game, { type: 'END_GAME', at: now(), via: 'manual-end' })
     expect(game.phase).toBe('finished')
 
@@ -168,10 +166,10 @@ describe('saving and loading', () => {
     const storage = memoryStorage()
     let game = startGame()
     game = must(game, { type: 'BEGIN_ROUND', at: now() })
-    game = playRound(game, 'p1', { p2: { wild: 1 }, p3: { wild: 1 }, p4: { n5: 1 } })
+    game = playRound(game, 'p1', { p2: 40, p3: 40, p4: 5 })
     game = must(game, { type: 'START_TIE_BREAK_REPLAY' })
     game = must(game, { type: 'SET_WINNER', playerId: 'p2' })
-    game = must(game, { type: 'SET_COUNT', playerId: 'p3', card: 'wild', value: 2 })
+    game = must(game, { type: 'SET_PENALTY', playerId: 'p3', penalty: 80 })
 
     saveGame(game, { storage })
     const loaded = loadSavedGame(storage)
@@ -187,7 +185,7 @@ describe('saving and loading', () => {
     let game = startGame(['Ana', 'Ben', 'Cara'], 1)
     game = must(game, { type: 'BEGIN_ROUND', at: now() })
     // Ben leaves at 10, which drops the table to two players.
-    game = playRound(game, 'p1', { p2: { skip: 1 }, p3: { n5: 1 } })
+    game = playRound(game, 'p1', { p2: 10, p3: 5 })
     expect(game.decision?.kind).toBe('insufficient-players')
 
     saveGame(game, { storage })
@@ -281,13 +279,13 @@ describe('damaged or outdated saves', () => {
     )
   })
 
-  it('discards impossible card counts', () => {
+  it('discards impossible penalties', () => {
     const storage = memoryStorage()
-    const game = enterRound(begin(startGame()), 'p1', { p2: { wild: 1 } })
+    const game = enterRound(begin(startGame()), 'p1', { p2: 40 })
     saveGame(game, { storage })
     const record = readRecord(storage)
-    const saved = record.game as { currentRound: { entries: Record<string, { counts: Record<string, number> }> } }
-    saved.currentRound.entries.p2.counts.wild = -1
+    const saved = record.game as { currentRound: { entries: Record<string, { penalty: number | null }> } }
+    saved.currentRound.entries.p2.penalty = -1
     storage.data.set(SAVED_GAME_KEY, JSON.stringify(record))
     expect(loadSavedGame(storage).status).toBe('discarded')
   })
@@ -405,20 +403,17 @@ describe('every point of a real game can be restored', () => {
     check('begin round')
     game = must(game, { type: 'SET_WINNER', playerId: 'p1' })
     check('winner')
-    game = must(game, { type: 'SET_COUNT', playerId: 'p2', card: 'wild', value: 1 })
-    check('one count')
-    game = must(game, { type: 'SET_COUNT', playerId: 'p3', card: 'wild', value: 1 })
-    check('tied count')
-    for (const id of ['p1', 'p2', 'p3', 'p4']) {
-      game = must(game, { type: 'CONFIRM_HAND', playerId: id, confirmed: true })
-      check(`confirm ${id}`)
-    }
+    game = must(game, { type: 'SET_PENALTY', playerId: 'p2', penalty: 40 })
+    check('one penalty')
+    game = must(game, { type: 'SET_PENALTY', playerId: 'p3', penalty: 40 })
+    game = must(game, { type: 'SET_PENALTY', playerId: 'p4', penalty: 0 })
+    check('tied penalty')
     game = must(game, { type: 'CONFIRM_ROUND', at: now() })
     check('confirmed round')
     game = must(game, { type: 'RESOLVE_TIE_BREAK_MANUAL', playerId: 'p2', note: null, at: now() })
     check('manual tie-break')
     game = must(game, { type: 'BEGIN_ROUND', at: now() })
-    game = enterRound(game, 'p1', { p3: { wild: 1 }, p4: { n2: 2 } })
+    game = enterRound(game, 'p1', { p3: 40, p4: 4 })
     check('second round entered')
     game = must(game, { type: 'DISCARD_ROUND' })
     check('round discarded')
@@ -426,6 +421,110 @@ describe('every point of a real game can be restored', () => {
     check('finished')
     game = must(game, { type: 'DECLARE_CHAMPION', playerId: 'p1', at: now() })
     check('declared champion')
+  })
+
+  it('restores a version-1 save by converting card counts into penalties', () => {
+    const storage = memoryStorage()
+    const zero = {
+      n0: 0, n1: 0, n2: 0, n3: 0, n4: 0, n5: 0, n6: 0, n7: 0, n8: 0, n9: 0,
+      skip: 0, reverse: 0, draw2: 0, wild: 0, wild4: 0,
+    }
+    const legacy = {
+      version: 1,
+      savedAt: 777,
+      game: {
+        phase: 'active',
+        config: { name: 'Old night', cutoff: 200, startedAt: 5 },
+        players: [
+          { id: 'p1', name: 'Ana', cumulativeScore: 0, eliminated: false, eliminatedAtRound: null, eliminationOrder: null },
+          { id: 'p2', name: 'Ben', cumulativeScore: 5, eliminated: false, eliminatedAtRound: null, eliminationOrder: null },
+          { id: 'p3', name: 'Cara', cumulativeScore: 0, eliminated: false, eliminatedAtRound: null, eliminationOrder: null },
+        ],
+        rounds: [
+          {
+            id: 'round-1',
+            kind: 'round',
+            roundNumber: 1,
+            winnerId: 'p1',
+            winnerName: 'Ana',
+            lines: [
+              { playerId: 'p1', name: 'Ana', counts: { ...zero, wild: 2 }, totalCards: 2, penalty: 0, previousTotal: 0, newTotal: 0, isWinner: true },
+              { playerId: 'p2', name: 'Ben', counts: { ...zero, n5: 1 }, totalCards: 1, penalty: 5, previousTotal: 0, newTotal: 5, isWinner: false },
+              { playerId: 'p3', name: 'Cara', counts: zero, totalCards: 0, penalty: 0, previousTotal: 0, newTotal: 0, isWinner: false },
+            ],
+            cutoff: 200,
+            finalizedAt: 6,
+            eliminations: [],
+            tieBreaks: [],
+            outcome: 'continue',
+            tieBreakPlayerIds: null,
+          },
+        ],
+        currentRound: {
+          id: 'round-2',
+          kind: 'round',
+          roundNumber: 2,
+          participants: ['p1', 'p2', 'p3'],
+          entries: {
+            p1: { counts: { ...zero, wild4: 1 }, confirmed: true },
+            p2: { counts: { ...zero, n7: 3 }, confirmed: true },
+            p3: { counts: { ...zero, skip: 1, draw2: 1 }, confirmed: false },
+          },
+          winnerId: 'p1',
+          tieBreakPlayerIds: null,
+        },
+        tieBreak: null,
+        decision: null,
+        ending: null,
+        allowTwoPlayerRounds: false,
+        nextEliminationOrder: 1,
+        startedAt: 5,
+        transfer: null,
+      },
+    }
+    storage.data.set(SAVED_GAME_KEY, JSON.stringify(legacy))
+
+    const loaded = loadSavedGame(storage)
+    expect(loaded.status).toBe('restored')
+    if (loaded.status !== 'restored') return
+
+    expect(loaded.savedAt).toBe(777)
+    // Finished rounds keep the score they already had, minus the card detail.
+    expect(loaded.game.rounds[0].lines).toEqual([
+      { playerId: 'p1', name: 'Ana', penalty: 0, previousTotal: 0, newTotal: 0, isWinner: true },
+      { playerId: 'p2', name: 'Ben', penalty: 5, previousTotal: 0, newTotal: 5, isWinner: false },
+      { playerId: 'p3', name: 'Cara', penalty: 0, previousTotal: 0, newTotal: 0, isWinner: false },
+    ])
+    // The open round's counters become the penalties they were worth.
+    expect(loaded.game.currentRound?.entries).toEqual({
+      p1: { penalty: 40 },
+      p2: { penalty: 21 },
+      p3: { penalty: 30 },
+    })
+    expect(loaded.game.currentRound?.winnerId).toBe('p1')
+  })
+
+  it('does not migrate a damaged legacy save silently', () => {
+    const storage = memoryStorage()
+    storage.data.set(
+      SAVED_GAME_KEY,
+      JSON.stringify({
+        version: 1,
+        savedAt: 1,
+        game: {
+          phase: 'active',
+          config: { name: '', cutoff: 200, startedAt: 1 },
+          players: [],
+          rounds: [],
+          currentRound: null,
+          allowTwoPlayerRounds: false,
+          nextEliminationOrder: 1,
+          startedAt: 1,
+          transfer: null,
+        },
+      }),
+    )
+    expect(loadSavedGame(storage).status).toBe('discarded')
   })
 
   it('normalises a save instead of trusting it', () => {

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { emptyRemainingCards, type CardKey, type HandEntries, type RemainingCards } from '../cards'
 import {
   buildStandings,
   computeRoundScores,
@@ -9,18 +8,12 @@ import {
   hasReachedCutoff,
   worstTieBreakPenalties,
 } from '../rules'
-import type { PlayerRecord, RoundRecord } from '../types'
+import type { PlayerRecord, RoundEntries, RoundRecord } from '../types'
 
-function hand(entries: Partial<Record<CardKey, number>>): RemainingCards {
-  return { ...emptyRemainingCards(), ...entries }
-}
-
-function entriesFor(
-  participants: string[],
-  hands: Record<string, Partial<Record<CardKey, number>>>,
-): HandEntries {
-  return participants.reduce<HandEntries>((acc, id) => {
-    acc[id] = { counts: hand(hands[id] ?? {}), confirmed: true }
+/** Builds the typed-in entries: `{ p2: 40 }` → a 40-point penalty for p2. */
+function entriesFor(participants: string[], penalties: Record<string, number>): RoundEntries {
+  return participants.reduce<RoundEntries>((acc, id) => {
+    acc[id] = { penalty: penalties[id] ?? 0 }
     return acc
   }, {})
 }
@@ -62,15 +55,11 @@ describe('computeRoundScores', () => {
     player('c', 'Cara', 30),
   ]
 
-  it('calculates penalties from remaining cards and adds them to cumulative totals', () => {
+  it('uses the entered penalties and adds them to cumulative totals', () => {
     const result = computeRoundScores({
       participants,
       players,
-      entries: entriesFor(participants, {
-        a: {},
-        b: { n7: 2, skip: 1, wild: 1 },
-        c: { draw2: 1, wild4: 1 },
-      }),
+      entries: entriesFor(participants, { a: 0, b: 64, c: 60 }),
       winnerId: 'a',
     })
     expect(result.penalties).toEqual({ a: 0, b: 64, c: 60 })
@@ -79,39 +68,35 @@ describe('computeRoundScores', () => {
     expect(result.lines.map((line) => line.newTotal)).toEqual([10, 84, 90])
   })
 
-  it('gives the winner zero penalty even when their hand is full of cards', () => {
+  it('gives the winner zero penalty even when points are stored against them', () => {
     const result = computeRoundScores({
       participants,
       players,
-      entries: entriesFor(participants, {
-        a: { wild4: 2, wild: 1, n9: 3 },
-        b: { n5: 1 },
-        c: { n5: 1 },
-      }),
-      winnerId: 'a',
-    })
-    expect(result.lines.find((line) => line.playerId === 'a')?.penalty).toBe(0)
-    expect(result.lines.find((line) => line.playerId === 'a')?.totalCards).toBe(6)
-    expect(result.totals.a).toBe(10)
-  })
-
-  it('still records the winner’s card counts for the breakdown', () => {
-    const result = computeRoundScores({
-      participants,
-      players,
-      entries: entriesFor(participants, { a: { wild: 1 }, b: {}, c: {} }),
+      entries: entriesFor(participants, { a: 120, b: 5, c: 5 }),
       winnerId: 'a',
     })
     const winnerLine = result.lines.find((line) => line.playerId === 'a')
-    expect(winnerLine?.counts.wild).toBe(1)
+    expect(winnerLine?.penalty).toBe(0)
     expect(winnerLine?.isWinner).toBe(true)
+    expect(result.totals.a).toBe(10)
+  })
+
+  it('treats a player whose penalty is not entered yet as zero in the preview', () => {
+    const result = computeRoundScores({
+      participants,
+      players,
+      entries: { b: { penalty: null } },
+      winnerId: 'b',
+    })
+    expect(result.penalties).toEqual({ a: 0, b: 0, c: 0 })
+    expect(result.lines).toHaveLength(3)
   })
 
   it('supports a supplied previous-total snapshot', () => {
     const result = computeRoundScores({
       participants: ['a'],
       players,
-      entries: entriesFor(['a'], {}),
+      entries: entriesFor(['a'], { a: 0 }),
       winnerId: 'b',
       previousTotals: { a: 500 },
     })
@@ -122,7 +107,7 @@ describe('computeRoundScores', () => {
     const result = computeRoundScores({
       participants: ['b'],
       players,
-      entries: entriesFor(['b'], { b: { n9: 1 } }),
+      entries: entriesFor(['b'], { b: 9 }),
       winnerId: 'a',
     })
     expect(result.penalties.b).toBe(9)
@@ -275,8 +260,6 @@ describe('standings', () => {
         {
           playerId: 'a',
           name: 'Ana',
-          counts: hand({ n8: 2 }),
-          totalCards: 2,
           penalty: 16,
           previousTotal: 0,
           newTotal: 16,
@@ -285,8 +268,6 @@ describe('standings', () => {
         {
           playerId: 'b',
           name: 'Ben',
-          counts: hand({}),
-          totalCards: 0,
           penalty: 0,
           previousTotal: 0,
           newTotal: 0,
@@ -313,8 +294,6 @@ describe('standings', () => {
           {
             playerId: 'a',
             name: 'Ana',
-            counts: hand({}),
-            totalCards: 0,
             penalty: 0,
             previousTotal: 0,
             newTotal: 0,

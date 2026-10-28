@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { CardKey } from '../cards'
 import {
   createInitialGameState,
   gameReducer,
@@ -61,32 +60,21 @@ function begin(state: GameState): GameState {
   return must(state, { type: 'BEGIN_ROUND', at: now() })
 }
 
-function setHand(
-  state: GameState,
-  playerId: string,
-  counts: Partial<Record<CardKey, number>>,
-): GameState {
-  let next = state
-  for (const [card, value] of Object.entries(counts)) {
-    next = must(next, {
-      type: 'SET_COUNT',
-      playerId,
-      card: card as CardKey,
-      value: value as number,
-    })
-  }
-  return must(next, { type: 'CONFIRM_HAND', playerId, confirmed: true })
-}
-
+/** Picks the winner, then types a penalty for every other participant. */
 function enterRound(
   state: GameState,
   winnerId: string,
-  hands: Record<string, Partial<Record<CardKey, number>>> = {},
+  penalties: Record<string, number> = {},
 ): GameState {
   let next = must(state, { type: 'SET_WINNER', playerId: winnerId })
   const participants = next.currentRound?.participants ?? []
   for (const id of participants) {
-    next = setHand(next, id, hands[id] ?? {})
+    if (id === winnerId) continue
+    next = must(next, {
+      type: 'SET_PENALTY',
+      playerId: id,
+      penalty: penalties[id] ?? 0,
+    })
   }
   return next
 }
@@ -96,8 +84,12 @@ function confirm(state: GameState): GameState {
   return must(state, { type: 'CONFIRM_ROUND', at: now() })
 }
 
-function play(state: GameState, winnerId: string, hands: Record<string, Partial<Record<CardKey, number>>> = {}): GameState {
-  return confirm(enterRound(state, winnerId, hands))
+function play(
+  state: GameState,
+  winnerId: string,
+  penalties: Record<string, number> = {},
+): GameState {
+  return confirm(enterRound(state, winnerId, penalties))
 }
 
 beforeEach(() => {
@@ -164,8 +156,9 @@ describe('round entry and validation', () => {
       winnerId: null,
       participants: ['p1', 'p2', 'p3'],
     })
-    expect(state.currentRound?.entries.p1.counts.wild).toBe(0)
-    expect(state.currentRound?.entries.p1.confirmed).toBe(false)
+    // Nothing is entered yet: every penalty starts empty.
+    expect(state.currentRound?.entries.p1.penalty).toBeNull()
+    expect(state.currentRound?.entries.p2.penalty).toBeNull()
   })
 
   it('prevents starting a second round while one is in progress', () => {
@@ -173,38 +166,47 @@ describe('round entry and validation', () => {
     expectError(state, { type: 'BEGIN_ROUND', at: now() }, 'ROUND_IN_PROGRESS')
   })
 
-  it('rejects negative, decimal and oversized counts', () => {
+  it('accepts whole penalties and rejects negative, decimal and oversized ones', () => {
     const state = begin(startGame(['Ana', 'Ben', 'Cara']))
-    expectError(state, { type: 'SET_COUNT', playerId: 'p1', card: 'wild', value: -1 }, 'INVALID_COUNT')
-    expectError(state, { type: 'SET_COUNT', playerId: 'p1', card: 'wild', value: 1.5 }, 'INVALID_COUNT')
-    expectError(state, { type: 'SET_COUNT', playerId: 'p1', card: 'wild', value: 1000 }, 'INVALID_COUNT')
-    expectError(state, { type: 'SET_COUNT', playerId: 'p9', card: 'wild', value: 1 }, 'INVALID_PLAYER')
+    expect(must(state, { type: 'SET_PENALTY', playerId: 'p1', penalty: 25 }).currentRound?.entries.p1.penalty).toBe(25)
+    expect(must(state, { type: 'SET_PENALTY', playerId: 'p1', penalty: 0 }).currentRound?.entries.p1.penalty).toBe(0)
+    expect(must(state, { type: 'SET_PENALTY', playerId: 'p1', penalty: null }).currentRound?.entries.p1.penalty).toBeNull()
+    expectError(state, { type: 'SET_PENALTY', playerId: 'p1', penalty: -1 }, 'INVALID_PENALTY')
+    expectError(state, { type: 'SET_PENALTY', playerId: 'p1', penalty: 1.5 }, 'INVALID_PENALTY')
+    expectError(state, { type: 'SET_PENALTY', playerId: 'p1', penalty: 10_000 }, 'INVALID_PENALTY')
+    expectError(state, { type: 'SET_PENALTY', playerId: 'p9', penalty: 5 }, 'INVALID_PLAYER')
   })
 
-  it('does not allow counts to fall below zero with the stepper', () => {
-    const state = begin(startGame(['Ana', 'Ben', 'Cara']))
-    expectError(
-      state,
-      { type: 'INCREMENT_COUNT', playerId: 'p1', card: 'skip', delta: -1 },
-      'INVALID_COUNT',
-    )
+  it('zeroes a new winner and frees the previous winner to enter a score', () => {
+    let state = begin(startGame(['Ana', 'Ben', 'Cara']))
+    state = must(state, { type: 'SET_PENALTY', playerId: 'p2', penalty: 35 })
+    state = must(state, { type: 'SET_WINNER', playerId: 'p1' })
+    expect(state.currentRound?.entries.p1.penalty).toBe(0)
+    // A winner's score is not editable, and switching winners reopens the old one.
+    expectError(state, { type: 'SET_PENALTY', playerId: 'p1', penalty: 20 }, 'INVALID_PENALTY')
+    state = must(state, { type: 'SET_WINNER', playerId: 'p2' })
+    expect(state.currentRound?.entries.p2.penalty).toBe(0)
+    expect(state.currentRound?.entries.p1.penalty).toBeNull()
+    expect(must(state, { type: 'SET_PENALTY', playerId: 'p1', penalty: 12 }).currentRound?.entries.p1.penalty).toBe(12)
   })
 
   it('requires a winner before the round can be confirmed', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara']))
-    state = setHand(state, 'p1', {})
-    state = setHand(state, 'p2', {})
-    state = setHand(state, 'p3', {})
+    state = must(state, { type: 'SET_PENALTY', playerId: 'p1', penalty: 5 })
+    state = must(state, { type: 'SET_PENALTY', playerId: 'p2', penalty: 10 })
+    state = must(state, { type: 'SET_PENALTY', playerId: 'p3', penalty: 15 })
     const result = expectError(state, { type: 'CONFIRM_ROUND', at: now() }, 'INCOMPLETE_ROUND')
     expect(result.error?.message).toMatch(/select the round winner/i)
   })
 
-  it('requires every hand to be confirmed before the round can be confirmed', () => {
+  it('requires a penalty for every non-winning player', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara']))
     state = must(state, { type: 'SET_WINNER', playerId: 'p1' })
-    state = setHand(state, 'p1', {})
-    state = setHand(state, 'p2', {})
-    expectError(state, { type: 'CONFIRM_ROUND', at: now() }, 'INCOMPLETE_ROUND')
+    state = must(state, { type: 'SET_PENALTY', playerId: 'p2', penalty: 30 })
+    const result = expectError(state, { type: 'CONFIRM_ROUND', at: now() }, 'INCOMPLETE_ROUND')
+    expect(result.error?.message).toMatch(/cara/i)
+    state = must(state, { type: 'SET_PENALTY', playerId: 'p3', penalty: 0 })
+    expect(confirm(state).rounds).toHaveLength(1)
   })
 
   it('only allows a participant to be selected as winner', () => {
@@ -239,7 +241,7 @@ describe('round entry and validation', () => {
 describe('round confirmation', () => {
   it('applies every penalty and records the round in one step', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara']))
-    state = play(state, 'p1', { p2: { wild: 1 }, p3: { n5: 2 } })
+    state = play(state, 'p1', { p2: 40, p3: 10 })
 
     expect(state.currentRound).toBeNull()
     expect(state.players.map((player) => player.cumulativeScore)).toEqual([0, 40, 10])
@@ -251,7 +253,7 @@ describe('round confirmation', () => {
 
   it('does not touch scores while the round is still being entered', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara']))
-    state = enterRound(state, 'p1', { p2: { wild: 2 }, p3: { n9: 3 } })
+    state = enterRound(state, 'p1', { p2: 80, p3: 27 })
     expect(state.currentRound).not.toBeNull()
     expect(state.players.map((player) => player.cumulativeScore)).toEqual([0, 0, 0])
     expect(state.rounds).toHaveLength(0)
@@ -259,15 +261,16 @@ describe('round confirmation', () => {
 
   it('requires a complete entry on the confirming action itself', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara']))
-    state = enterRound(state, 'p1', { p2: { wild: 1 } })
-    state = must(state, { type: 'CONFIRM_HAND', playerId: 'p3', confirmed: false })
+    state = enterRound(state, 'p1', { p2: 40 })
+    // Blanking an entered penalty makes the round unconfirmable again.
+    state = must(state, { type: 'SET_PENALTY', playerId: 'p3', penalty: null })
     expectError(state, { type: 'CONFIRM_ROUND', at: now() }, 'INCOMPLETE_ROUND')
     expect(state.rounds).toHaveLength(0)
   })
 
   it('prevents confirming the same round twice', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara']))
-    state = play(state, 'p1', { p2: { n5: 1 } })
+    state = play(state, 'p1', { p2: 5 })
     expect(state.rounds).toHaveLength(1)
     const before = state.players.map((player) => player.cumulativeScore)
     expectError(state, { type: 'CONFIRM_ROUND', at: now() }, 'NO_CURRENT_ROUND')
@@ -277,16 +280,15 @@ describe('round confirmation', () => {
 
   it('leaves no editable round behind after confirming', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara']))
-    state = play(state, 'p1', { p2: { n5: 1 } })
-    expectError(state, { type: 'SET_COUNT', playerId: 'p2', card: 'n5', value: 2 }, 'NO_CURRENT_ROUND')
-    expectError(state, { type: 'CONFIRM_HAND', playerId: 'p2', confirmed: false }, 'NO_CURRENT_ROUND')
+    state = play(state, 'p1', { p2: 5 })
+    expectError(state, { type: 'SET_PENALTY', playerId: 'p2', penalty: 2 }, 'NO_CURRENT_ROUND')
     expectError(state, { type: 'SET_WINNER', playerId: 'p2' }, 'NO_CURRENT_ROUND')
     expectError(state, { type: 'DISCARD_ROUND' }, 'NO_CURRENT_ROUND')
   })
 
   it('refuses to discard a round that was already confirmed', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara']))
-    state = play(state, 'p1', { p2: { wild: 1 } })
+    state = play(state, 'p1', { p2: 40 })
     const result = expectError(state, { type: 'CONFIRM_ROUND', at: now() }, 'NO_CURRENT_ROUND')
     expect(result.state).toBe(state)
     expect(state.players.find((player) => player.id === 'p2')?.cumulativeScore).toBe(40)
@@ -294,11 +296,11 @@ describe('round confirmation', () => {
 
   it('confirms tie-break rounds through the same action', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara'], { cutoff: 20 }))
-    state = play(state, 'p1', { p2: { wild: 1 }, p3: { wild: 1 } })
+    state = play(state, 'p1', { p2: 40, p3: 40 })
     expect(state.tieBreak).not.toBeNull()
 
     state = must(state, { type: 'START_TIE_BREAK_REPLAY' })
-    state = enterRound(state, 'p3', { p2: { n9: 1 } })
+    state = enterRound(state, 'p3', { p2: 9 })
     state = confirm(state)
 
     expect(state.currentRound).toBeNull()
@@ -311,9 +313,9 @@ describe('round confirmation', () => {
 describe('cumulative scoring', () => {
   it('carries totals across rounds and records previous totals', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara'], { cutoff: 500 }))
-    state = play(state, 'p1', { p2: { wild: 1 }, p3: { draw2: 1 } })
+    state = play(state, 'p1', { p2: 40, p3: 20 })
     state = begin(state)
-    state = play(state, 'p2', { p1: { n9: 2, skip: 1 }, p3: { reverse: 1 } })
+    state = play(state, 'p2', { p1: 28, p3: 10 })
     expect(state.players.map((player) => player.cumulativeScore)).toEqual([28, 40, 30])
     expect(state.rounds).toHaveLength(2)
     expect(state.rounds[1].roundNumber).toBe(2)
@@ -324,9 +326,20 @@ describe('cumulative scoring', () => {
     })
   })
 
-  it('gives the winner a zero penalty even with remaining cards', () => {
+  it('gives the winner a zero penalty even if points were entered for them', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara'], { cutoff: 500 }))
-    state = play(state, 'p1', { p1: { wild4: 2, wild: 1 }, p2: { n5: 1 } })
+    state = must(state, { type: 'SET_WINNER', playerId: 'p1' })
+    state = must(state, { type: 'SET_PENALTY', playerId: 'p2', penalty: 5 })
+    state = must(state, { type: 'SET_PENALTY', playerId: 'p3', penalty: 5 })
+    // Simulate a stored value against the winner (e.g. an older save): the
+    // rules still score them zero.
+    state = {
+      ...state,
+      currentRound: state.currentRound
+        ? { ...state.currentRound, entries: { ...state.currentRound.entries, p1: { penalty: 120 } } }
+        : null,
+    }
+    state = confirm(state)
     expect(state.players.find((player) => player.id === 'p1')?.cumulativeScore).toBe(0)
     expect(state.rounds[0].lines.find((line) => line.playerId === 'p1')?.penalty).toBe(0)
   })
@@ -335,7 +348,7 @@ describe('cumulative scoring', () => {
 describe('cutoff and elimination', () => {
   it('does not eliminate before the round is confirmed', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara'], { cutoff: 10 }))
-    state = enterRound(state, 'p1', { p2: { n9: 2 }, p3: { n5: 1 } })
+    state = enterRound(state, 'p1', { p2: 18, p3: 5 })
     expect(state.players.every((player) => !player.eliminated)).toBe(true)
     state = confirm(state)
     expect(state.players.filter((player) => player.eliminated)).toHaveLength(1)
@@ -344,7 +357,7 @@ describe('cutoff and elimination', () => {
 
   it('eliminates the highest scorer when the score exactly reaches the cutoff', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara'], { cutoff: 100 }))
-    state = play(state, 'p1', { p2: { n9: 11 }, p3: { n9: 10, skip: 1 } })
+    state = play(state, 'p1', { p2: 99, p3: 100 })
     const ben = state.players.find((player) => player.id === 'p2')
     const cara = state.players.find((player) => player.id === 'p3')
     expect(ben?.cumulativeScore).toBe(99)
@@ -363,7 +376,7 @@ describe('cutoff and elimination', () => {
 
   it('does not eliminate anyone below the cutoff', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara'], { cutoff: 200 }))
-    state = play(state, 'p1', { p2: { n7: 25 }, p3: { n9: 9 } })
+    state = play(state, 'p1', { p2: 175, p3: 81 })
     expect(state.players.every((player) => !player.eliminated)).toBe(true)
     expect(state.decision).toBeNull()
     expect(state.rounds[0].outcome).toBe('continue')
@@ -372,7 +385,7 @@ describe('cutoff and elimination', () => {
 
   it('knocks out only the worst player each round', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara'], { cutoff: 200 }))
-    state = play(state, 'p1', { p2: { n5: 40 }, p3: { n5: 43 } })
+    state = play(state, 'p1', { p2: 200, p3: 215 })
     expect(state.players.map((player) => player.cumulativeScore)).toEqual([0, 200, 215])
     expect(state.players.find((player) => player.id === 'p2')?.eliminated).toBe(false)
     expect(state.players.find((player) => player.id === 'p3')?.eliminated).toBe(true)
@@ -382,10 +395,10 @@ describe('cutoff and elimination', () => {
   it('records elimination order and keeps eliminated players in the roster', () => {
     let state = startGame(['Ana', 'Ben', 'Cara', 'Dev'], { cutoff: 20 })
     state = begin(state)
-    state = play(state, 'p1', { p2: { wild: 1 }, p3: { n5: 1 }, p4: { n2: 1 } })
+    state = play(state, 'p1', { p2: 40, p3: 5, p4: 2 })
     expect(state.players.find((player) => player.id === 'p2')?.eliminationOrder).toBe(1)
     state = begin(state)
-    state = play(state, 'p3', { p1: { n9: 1 }, p4: { n9: 3 } })
+    state = play(state, 'p3', { p1: 9, p4: 27 })
     expect(state.players.find((player) => player.id === 'p4')?.eliminationOrder).toBe(2)
     expect(state.players).toHaveLength(4)
     expect(state.rounds[1].eliminations[0].order).toBe(2)
@@ -397,9 +410,9 @@ describe('tie handling', () => {
     let state = startGame(['Ana', 'Ben', 'Cara', 'Dev'], { cutoff: 80 })
     state = begin(state)
     return play(state, 'p1', {
-      p2: { wild: 1, wild4: 1 },
-      p3: { wild: 2 },
-      p4: { n5: 1 },
+      p2: 80,
+      p3: 80,
+      p4: 5,
     })
   }
 
@@ -449,7 +462,7 @@ describe('tie handling', () => {
       roundNumber: 1,
       participants: ['p2', 'p3'],
     })
-    state = enterRound(state, 'p3', { p2: { n9: 1 }, p3: {} })
+    state = enterRound(state, 'p3', { p2: 9 })
     state = confirm(state)
     expect(state.currentRound).toBeNull()
     expect(state.tieBreak).toBeNull()
@@ -467,7 +480,7 @@ describe('tie handling', () => {
     let state = tieGame()
     const before = state.players.map((player) => player.cumulativeScore)
     state = must(state, { type: 'START_TIE_BREAK_REPLAY' })
-    state = enterRound(state, 'p3', { p2: { wild: 1 }, p3: {} })
+    state = enterRound(state, 'p3', { p2: 40 })
     state = confirm(state)
     const after = state.players.map((player) => player.cumulativeScore)
     expect(after).toEqual(before)
@@ -491,7 +504,7 @@ describe('tie handling', () => {
 
   it('blocks starting a replay while another tie-break entry is open', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara'], { cutoff: 20 }))
-    state = play(state, 'p1', { p2: { wild: 1 }, p3: { wild: 1 } })
+    state = play(state, 'p1', { p2: 40, p3: 40 })
     state = must(state, { type: 'START_TIE_BREAK_REPLAY' })
     expectError(state, { type: 'START_TIE_BREAK_REPLAY' }, 'ROUND_IN_PROGRESS')
   })
@@ -500,7 +513,7 @@ describe('tie handling', () => {
 describe('too few players and game endings', () => {
   it('stops for a controller decision when only two players remain', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara'], { cutoff: 10 }))
-    state = play(state, 'p1', { p2: { n9: 2 }, p3: { n5: 1 } })
+    state = play(state, 'p1', { p2: 18, p3: 5 })
     expect(state.decision).toMatchObject({
       kind: 'insufficient-players',
       activePlayerIds: ['p1', 'p3'],
@@ -512,13 +525,13 @@ describe('too few players and game endings', () => {
 
   it('lets the table explicitly continue with two players', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara'], { cutoff: 10 }))
-    state = play(state, 'p1', { p2: { n9: 2 }, p3: { n5: 1 } })
+    state = play(state, 'p1', { p2: 18, p3: 5 })
     state = must(state, { type: 'CONTINUE_WITH_TWO_PLAYERS' })
     expect(state.allowTwoPlayerRounds).toBe(true)
     expect(state.decision).toBeNull()
     state = begin(state)
     expect(state.currentRound?.participants).toEqual(['p1', 'p3'])
-    state = play(state, 'p1', { p3: { n9: 1 } })
+    state = play(state, 'p1', { p3: 9 })
     expect(state.phase).toBe('finished')
     expect(state.ending).toMatchObject({ kind: 'champion', championId: 'p1', via: 'last-standing' })
     expect(state.rounds[1].outcome).toBe('champion')
@@ -527,7 +540,7 @@ describe('too few players and game endings', () => {
 
   it('crowns the only eligible player when a decision leads to a single survivor', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara'], { cutoff: 10 }))
-    state = play(state, 'p1', { p2: { n9: 2 }, p3: { n5: 1 } })
+    state = play(state, 'p1', { p2: 18, p3: 5 })
     state = must(state, { type: 'END_GAME', at: now(), via: 'controller-end' })
     expect(state.phase).toBe('finished')
     expect(state.ending).toMatchObject({ kind: 'champion', championId: 'p1', via: 'controller-end' })
@@ -604,25 +617,16 @@ describe('edge-case guards', () => {
 
   it('blocks every entry mutation without a current round', () => {
     const state = startGame(['Ana', 'Ben', 'Cara'])
-    expectError(state, { type: 'SET_COUNT', playerId: 'p1', card: 'wild', value: 1 }, 'NO_CURRENT_ROUND')
-    expectError(state, { type: 'INCREMENT_COUNT', playerId: 'p1', card: 'wild', delta: 1 }, 'NO_CURRENT_ROUND')
-    expectError(state, { type: 'CONFIRM_HAND', playerId: 'p1', confirmed: true }, 'NO_CURRENT_ROUND')
+    expectError(state, { type: 'SET_PENALTY', playerId: 'p1', penalty: 5 }, 'NO_CURRENT_ROUND')
     expectError(state, { type: 'SET_WINNER', playerId: 'p1' }, 'NO_CURRENT_ROUND')
     expectError(state, { type: 'CONFIRM_ROUND', at: now() }, 'NO_CURRENT_ROUND')
     expectError(state, { type: 'DISCARD_ROUND' }, 'NO_CURRENT_ROUND')
   })
 
-  it('does not allow steppers to exceed the per-card cap', () => {
-    let state = begin(startGame(['Ana', 'Ben', 'Cara']))
-    state = must(state, { type: 'SET_COUNT', playerId: 'p1', card: 'skip', value: 99 })
-    expectError(state, { type: 'INCREMENT_COUNT', playerId: 'p1', card: 'skip', delta: 1 }, 'INVALID_COUNT')
-    expect(state.currentRound?.entries.p1.counts.skip).toBe(99)
-  })
-
   it('does not allow editing or discarding after confirmation', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara']))
-    state = play(state, 'p1', { p2: { n5: 1 } })
-    expectError(state, { type: 'SET_COUNT', playerId: 'p2', card: 'n5', value: 2 }, 'NO_CURRENT_ROUND')
+    state = play(state, 'p1', { p2: 5 })
+    expectError(state, { type: 'SET_PENALTY', playerId: 'p2', penalty: 2 }, 'NO_CURRENT_ROUND')
     expectError(state, { type: 'DISCARD_ROUND' }, 'NO_CURRENT_ROUND')
     expectError(state, { type: 'CONFIRM_ROUND', at: now() }, 'NO_CURRENT_ROUND')
   })
@@ -645,7 +649,7 @@ describe('edge-case guards', () => {
 describe('reset behaviour', () => {
   it('clears every trace of the session', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara'], { cutoff: 20 }))
-    state = play(state, 'p1', { p2: { wild: 1 }, p3: { n5: 1 } })
+    state = play(state, 'p1', { p2: 40, p3: 5 })
     expect(state.players.some((player) => player.eliminated)).toBe(true)
     expect(state.rounds).toHaveLength(1)
 
@@ -669,7 +673,7 @@ describe('reset behaviour', () => {
 
   it('discards an open round entry when the game ends', () => {
     let state = begin(startGame(['Ana', 'Ben', 'Cara']))
-    state = enterRound(state, 'p1', { p2: { wild: 1 } })
+    state = enterRound(state, 'p1', { p2: 40 })
     state = must(state, { type: 'END_GAME', at: now() })
     expect(state.currentRound).toBeNull()
     expect(state.players.map((player) => player.cumulativeScore)).toEqual([0, 0, 0])

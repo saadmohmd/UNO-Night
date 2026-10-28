@@ -156,7 +156,7 @@ export function RoundResultsScreen({
               Score breakdown
             </h2>
             <span className="text-[11px] text-faint">
-              {round.lines.length} hands counted
+              {round.lines.length} {round.lines.length === 1 ? 'player' : 'players'}
             </span>
           </div>
           <div className="space-y-2.5">
@@ -165,7 +165,6 @@ export function RoundResultsScreen({
                 key={line.playerId}
                 name={line.name}
                 index={accentIndexOf(line.playerId)}
-                counts={line.counts}
                 penalty={line.penalty}
                 previousTotal={line.previousTotal}
                 newTotal={line.newTotal}

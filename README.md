@@ -1,8 +1,8 @@
 # UNO Night — Score Tracker
 
 A single-device companion app for physical UNO games. One phone, tablet or laptop sits
-on the table; everyone records the cards left in their hand after each round and the app
-handles the maths and the knockout cutoff.
+on the table; after each round the table picks the winner, types in each player's penalty
+points and the app handles the running totals and the knockout cutoff.
 
 - 100% client-side. No backend, no accounts, no database, no network calls after load.
 - Games move between phones with QR codes or a JSON file — a one-time handover, never a sync.
@@ -43,11 +43,11 @@ No environment variables, server routes or API keys are involved.
 The whole game lives in one `localStorage` record on this device.
 
 - **What is saved** — phase, game name, cutoff, player names and count, each player's
-  cumulative score and elimination state, every confirmed round, the open round (winner,
-  card counts, confirmations), tie-break and controller-decision state, the ending, and the
-  timestamps the scoreboard already shows. Nothing else — no emails, no accounts, no
-  analytics, no history archive.
-- **When** — synchronously after every state change (a count, a winner, a confirmed round),
+  cumulative score and elimination state, every confirmed round, the open round (winner and
+  typed penalties), tie-break and controller-decision state, the ending, and the timestamps
+  the scoreboard already shows. Nothing else — no emails, no accounts, no analytics, no
+  history archive.
+- **When** — synchronously after every state change (a penalty, a winner, a confirmed round),
   so a refresh loses nothing.
 - **On load** — the record is validated field by field before it is used, then the app
   reopens the screen the game is in: score entry for an open round, the tie-break or
@@ -74,7 +74,7 @@ Move a game from one phone to another without a server.
 
 **On the old phone:** game menu ▸ *Transfer game*. The whole game is captured — players,
 cumulative scores, cutoff, every confirmed round, eliminations, tie-break state and any open
-round with its card counts. It is encoded, compressed and shown as a QR code (or a set of
+round with the penalties typed in so far. It is encoded, compressed and shown as a QR code (or a set of
 labelled parts), alongside a *Save game file* button.
 
 **On the new phone:** *Import game* (home screen, or the game menu). Scan the code with the
@@ -111,8 +111,8 @@ game needs two, and 40 rounds about three.
 
 Everything is validated on arrival: envelope version, handover id, then the game itself
 through the same field-by-field validator used for saved games — 3–7 players, whole-number
-scores and card counts, cutoff range, consistent eliminations, and player references inside
-every round, hand and tie-break. Invalid transfers never reach the app state.
+penalties, cutoff range, consistent eliminations, and player references inside every round
+and tie-break. Invalid transfers never reach the app state.
 
 **Honest limitations.** This is a snapshot, not live synchronisation: two offline phones
 cannot confirm each other, and scores entered on the old phone after the handover are simply
@@ -128,33 +128,33 @@ receiving phone, so that confirmation is deliberate.
 - Score cutoff (1–100,000) — preset chips or free entry.
 - The roster locks once the game starts; leaving the page warns you first.
 
-### Scoring (official point values)
+### Scoring (direct penalty entry)
 
-| Card | Points |
-| --- | --- |
-| Number 0–9 | face value |
-| Skip | 10 |
-| Reverse | 10 |
-| Draw Two (+2) | 20 |
-| Wild | 40 |
-| Wild Draw Four (+4) | 40 |
+The round winner scores **0**. Every other player's score for the round is the total they
+type in — the app never asks for individual cards and never re-derives the number, so
+whatever the table counts (official values or house rules) is what gets recorded.
 
-`round penalty = Σ (card count × card value)` for every player except the winner, whose
-penalty is forced to 0 even if they still hold cards. Cumulative score = previous total +
-round penalty. All maths lives in pure functions in `src/game/cards.ts` and is used by every
-screen — there is no duplicated formula in the UI.
+- One big numeric field per player, digits only: no negatives, no decimals.
+- The winner's field is locked at 0 and cannot be edited.
+- Changing the winner frees the previous winner's field so their score has to be entered.
+- A round cannot be confirmed until one winner is picked and every other player has a
+  whole number.
+- Cumulative score = previous total + round penalty, calculated in pure functions in
+  `src/game/rules.ts`; the UI never does its own arithmetic.
+
+Games saved by an older build (which recorded per-card counts) are migrated on load using
+a frozen copy of the old card values, so an open game keeps the exact scores it had.
 
 ### Round flow
 1. Begin round from the dashboard.
-2. Pick the single round winner, then record and confirm each player's remaining cards
-   (steppers plus direct numeric entry, live penalty preview).
-3. Review the card-by-card breakdown in a confirmation sheet.
-4. Confirm the round — the scores are applied immediately and the cutoff is evaluated.
-5. Results are shown, and the next round can start once at least the minimum number of
-   players remains.
+2. Tap the round winner (their score is fixed at 0).
+3. Type every other player's penalty points — the summary shows each new cumulative total.
+4. Confirm the round; the scores are applied immediately and the cutoff is evaluated.
+5. Results are shown, and the next round can start once enough players remain.
 
-Confirming is final: a round cannot be confirmed until every hand is valid, cannot be
-confirmed twice, and a new round cannot start while one is open or awaiting a tie-break.
+Confirming is final: a round cannot be confirmed until every non-winner has a valid
+penalty, cannot be confirmed twice (the open round is cleared atomically), and a new round
+cannot start while one is open or awaiting a tie-break.
 
 ### Cutoff and eliminations
 After a **confirmed** round, the eligible player with the highest cumulative score is
@@ -175,8 +175,8 @@ knocked out **only if** that score is greater than or equal to the cutoff.
 ```
 src/
   game/            pure engine — no React, fully unit tested
-    cards.ts        card catalogue, penalty + breakdown maths
-    validation.ts   roster, cutoff, count and round-entry validation
+    validation.ts   roster, cutoff, penalty and round-entry validation
+    legacy.ts       frozen card table, used only to read pre-penalty saves/codes
     rules.ts        scoring, cutoff evaluation, tie detection, standings
     reducer.ts      the game state machine (all mutations validated)
     selectors.ts    screen resolution and derived view data
@@ -199,8 +199,9 @@ src/
   is only frozen when someone confirms the code on it.
 - The camera needs `https://` (or `localhost`). Over plain HTTP on a LAN the scanner falls
   back automatically to the file/paste import.
-- A save from an incompatible version is discarded rather than migrated; the app never runs
-  on data it does not understand.
+- Saves from the previous (card-count) format are migrated once, on load; anything newer,
+  damaged or unrecognised is discarded rather than guessed at. The app never runs on data
+  it does not understand.
 - The `beforeunload` warning only arms when saving is unavailable, and it is best-effort:
   browsers decide whether to show it.
 - Elimination uses the "single knockout" reading of the cutoff rule: only the worst eligible

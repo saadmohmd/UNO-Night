@@ -3,16 +3,10 @@
  * continuation decisions and standings. No React and no time-based logic.
  */
 
-import {
-  CARD_KEYS,
-  calculatePenalty,
-  totalCards,
-  type HandEntries,
-  type RemainingCards,
-} from './cards'
 import type {
   GameState,
   PlayerRecord,
+  RoundEntries,
   RoundRecord,
   RoundScoreLine,
 } from './types'
@@ -20,7 +14,7 @@ import type {
 export interface ComputeRoundInput {
   participants: string[]
   players: Pick<PlayerRecord, 'id' | 'name' | 'cumulativeScore'>[]
-  entries: HandEntries
+  entries: RoundEntries
   winnerId: string
   /**
    * When supplied, previous totals come from this snapshot instead of the
@@ -37,7 +31,10 @@ export interface ComputeRoundOutput {
 
 /**
  * Calculates penalties and projected totals for a round.
- * The winner always receives a zero penalty, whatever cards they still hold.
+ *
+ * The typed-in penalty is the round score. The winner always receives zero,
+ * whatever is stored against them, and a player whose penalty has not been
+ * entered yet contributes nothing to the preview.
  */
 export function computeRoundScores(input: ComputeRoundInput): ComputeRoundOutput {
   const playerById = new Map(input.players.map((player) => [player.id, player]))
@@ -48,16 +45,13 @@ export function computeRoundScores(input: ComputeRoundInput): ComputeRoundOutput
   for (const playerId of input.participants) {
     const player = playerById.get(playerId)
     if (!player) continue
-    const entry = input.entries[playerId]
-    const counts: RemainingCards = entry ? { ...entry.counts } : zeroCountsSafe()
     const isWinner = playerId === input.winnerId
-    const penalty = isWinner ? 0 : calculatePenalty(counts)
+    const entered = input.entries[playerId]?.penalty ?? null
+    const penalty = isWinner ? 0 : (entered ?? 0)
     const previousTotal = input.previousTotals?.[playerId] ?? player.cumulativeScore
     lines.push({
       playerId,
       name: player.name,
-      counts,
-      totalCards: totalCards(counts),
       penalty,
       previousTotal,
       newTotal: previousTotal + penalty,
@@ -68,13 +62,6 @@ export function computeRoundScores(input: ComputeRoundInput): ComputeRoundOutput
   }
 
   return { lines, penalties, totals }
-}
-
-function zeroCountsSafe(): RemainingCards {
-  return CARD_KEYS.reduce((acc, key) => {
-    acc[key] = 0
-    return acc
-  }, {} as RemainingCards)
 }
 
 /** True when the score reaches or passes the cutoff. */

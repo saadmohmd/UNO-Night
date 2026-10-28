@@ -2,9 +2,10 @@
  * Pure game state machine. Every mutation is validated and no action can
  * silently change a score, invent a winner or confirm a round twice.
  *
- * Round flow: enter the card counts, review them, then confirm. Confirming is a
- * single atomic step — it validates the entry, applies the penalties, evaluates
- * the cutoff and records the round. There is no submission or approval stage.
+ * Round flow: pick the winner, type every other player's penalty, then confirm.
+ * Confirming is a single atomic step — it validates the entry, applies those
+ * penalties, evaluates the cutoff and records the round. A confirmed round is
+ * cleared from state, so it can never be counted twice.
  *
  * Elimination rule: after a confirmed round, the eligible player with the
  * highest cumulative score is knocked out — but only once that score reaches
@@ -12,8 +13,7 @@
  * is resolved (replay or explicit controller decision).
  */
 
-import { CARD_KEYS, emptyRemainingCards, type CardKey, type HandEntries } from './cards'
-import { MAX_CARD_COUNT, validateRoster, validateRoundEntry, validateCutoff } from './validation'
+import { MAX_PENALTY, validateRoster, validateRoundEntry, validateCutoff } from './validation'
 import {
   activePlayers,
   computeRoundScores,
@@ -24,6 +24,7 @@ import {
 } from './rules'
 import type {
   CurrentRound,
+  RoundEntries,
   EliminationRecord,
   EliminationVia,
   GameEnding,
@@ -45,7 +46,7 @@ export type GameErrorCode =
   | 'INCOMPLETE_ROUND'
   | 'NOT_FINISHED'
   | 'INVALID_PLAYER'
-  | 'INVALID_COUNT'
+  | 'INVALID_PENALTY'
   | 'INVALID_TIE_BREAK_PHASE'
   | 'GAME_TRANSFERRED'
   | 'TRANSFER_ALREADY_DONE'
@@ -65,9 +66,7 @@ export type GameAction =
   | { type: 'START_GAME'; payload: StartGamePayload }
   | { type: 'BEGIN_ROUND'; at: number }
   | { type: 'START_TIE_BREAK_REPLAY' }
-  | { type: 'SET_COUNT'; playerId: string; card: CardKey; value: number }
-  | { type: 'INCREMENT_COUNT'; playerId: string; card: CardKey; delta: number }
-  | { type: 'CONFIRM_HAND'; playerId: string; confirmed: boolean }
+  | { type: 'SET_PENALTY'; playerId: string; penalty: number | null }
   | { type: 'SET_WINNER'; playerId: string }
   | { type: 'CONFIRM_ROUND'; at: number }
   | { type: 'DISCARD_ROUND' }
@@ -105,9 +104,9 @@ const fail = (state: GameState, code: GameErrorCode, message: string): GameActio
 
 const ok = (state: GameState): GameActionResult => ({ state, error: null })
 
-function emptyEntries(participants: string[]): HandEntries {
-  return participants.reduce<HandEntries>((acc, id) => {
-    acc[id] = { counts: emptyRemainingCards(), confirmed: false }
+function emptyEntries(participants: string[]): RoundEntries {
+  return participants.reduce<RoundEntries>((acc, id) => {
+    acc[id] = { penalty: null }
     return acc
   }, {})
 }
@@ -395,79 +394,36 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
       return ok({ ...state, currentRound })
     }
 
-    case 'SET_COUNT': {
+    case 'SET_PENALTY': {
       const round = state.currentRound
       if (!round) return fail(state, 'NO_CURRENT_ROUND', 'There is no round being recorded.')
       if (!round.participants.includes(action.playerId)) {
         return fail(state, 'INVALID_PLAYER', 'That player is not part of this round.')
       }
-      if (!CARD_KEYS.includes(action.card)) {
-        return fail(state, 'INVALID_COUNT', 'Unknown card type.')
+      if (action.playerId === round.winnerId) {
+        // The winner's score is fixed at zero by the rules; editing is refused
+        // here too so the stored entry can never contradict the visible score.
+        return fail(state, 'INVALID_PENALTY', 'The round winner always scores 0.')
       }
       if (
-        !Number.isInteger(action.value) ||
-        action.value < 0 ||
-        action.value > MAX_CARD_COUNT
+        action.penalty !== null &&
+        (!Number.isInteger(action.penalty) ||
+          action.penalty < 0 ||
+          action.penalty > MAX_PENALTY)
       ) {
         return fail(
           state,
-          'INVALID_COUNT',
-          `Card counts must be whole numbers from 0 to ${MAX_CARD_COUNT}.`,
+          'INVALID_PENALTY',
+          `Penalty points must be whole numbers from 0 to ${MAX_PENALTY}.`,
         )
       }
-      const entry = round.entries[action.playerId]
-      if (!entry) return fail(state, 'INVALID_PLAYER', 'Missing entry for that player.')
       return ok({
         ...state,
         currentRound: {
           ...round,
           entries: {
             ...round.entries,
-            [action.playerId]: {
-              ...entry,
-              counts: { ...entry.counts, [action.card]: action.value },
-            },
-          },
-        },
-      })
-    }
-
-    case 'INCREMENT_COUNT': {
-      const round = state.currentRound
-      if (!round) return fail(state, 'NO_CURRENT_ROUND', 'There is no round being recorded.')
-      const entry = round.entries[action.playerId]
-      if (!entry) return fail(state, 'INVALID_PLAYER', 'That player is not part of this round.')
-      const next = (entry.counts[action.card] ?? 0) + action.delta
-      if (!Number.isInteger(next) || next < 0 || next > MAX_CARD_COUNT) {
-        return fail(state, 'INVALID_COUNT', 'Card counts must stay between 0 and 99.')
-      }
-      return ok({
-        ...state,
-        currentRound: {
-          ...round,
-          entries: {
-            ...round.entries,
-            [action.playerId]: {
-              ...entry,
-              counts: { ...entry.counts, [action.card]: next },
-            },
-          },
-        },
-      })
-    }
-
-    case 'CONFIRM_HAND': {
-      const round = state.currentRound
-      if (!round) return fail(state, 'NO_CURRENT_ROUND', 'There is no round being recorded.')
-      const entry = round.entries[action.playerId]
-      if (!entry) return fail(state, 'INVALID_PLAYER', 'That player is not part of this round.')
-      return ok({
-        ...state,
-        currentRound: {
-          ...round,
-          entries: {
-            ...round.entries,
-            [action.playerId]: { ...entry, confirmed: action.confirmed },
+            [action.playerId]: { penalty: action.penalty },
           },
         },
       })
@@ -479,9 +435,20 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
       if (!round.participants.includes(action.playerId)) {
         return fail(state, 'INVALID_PLAYER', 'Choose the winner from this round’s players.')
       }
+      const previousWinnerId = round.winnerId
+      const entries: RoundEntries = {
+        ...round.entries,
+        // Picking a winner zeroes their penalty right away.
+        [action.playerId]: { penalty: 0 },
+      }
+      if (previousWinnerId && previousWinnerId !== action.playerId) {
+        // The player who is no longer the winner gets an empty field back, so
+        // their score has to be entered rather than inherited from the winner.
+        entries[previousWinnerId] = { penalty: null }
+      }
       return ok({
         ...state,
-        currentRound: { ...round, winnerId: action.playerId },
+        currentRound: { ...round, winnerId: action.playerId, entries },
       })
     }
 
@@ -491,7 +458,7 @@ export function gameReducer(state: GameState, action: GameAction): GameActionRes
       if (!state.config) return fail(state, 'INVALID_PHASE', 'No active game.')
 
       // Confirming is the only way a round can be recorded, so it validates the
-      // full entry itself: complete hands, exactly one winner, valid counts.
+      // full entry itself: exactly one winner, a valid penalty for everyone else.
       const validation = validateRoundEntry({
         participants: round.participants.map((id) => ({
           id,
@@ -736,11 +703,7 @@ function confirmTieBreakRound(
     winnerId: round.winnerId ?? '',
   })
   const hands = lines.reduce<NonNullable<TieBreakRecord['hands']>>((acc, line) => {
-    acc[line.playerId] = {
-      counts: line.counts,
-      totalCards: line.totalCards,
-      penalty: line.penalty,
-    }
+    acc[line.playerId] = { penalty: line.penalty }
     return acc
   }, {})
 

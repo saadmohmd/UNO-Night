@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { compressToEncodedURIComponent } from 'lz-string'
-import { packGame } from '../transferCodec'
-import type { CardKey } from '../cards'
+import { packGame, unpackGame } from '../transferCodec'
+import { parseGameState } from '../persistence'
 import { createInitialGameState, gameReducer, type GameAction } from '../reducer'
 import {
   MAX_PARTS,
@@ -63,15 +63,13 @@ function startGame(names = ['Ana', 'Ben', 'Cara', 'Dev'], cutoff = 40): GameStat
 function playRound(
   state: GameState,
   winnerId: string,
-  hands: Record<string, Partial<Record<CardKey, number>>> = {},
+  penalties: Record<string, number> = {},
 ): GameState {
   let next = must(state, { type: 'BEGIN_ROUND', at: now() })
   next = must(next, { type: 'SET_WINNER', playerId: winnerId })
   for (const id of next.currentRound?.participants ?? []) {
-    for (const [card, value] of Object.entries(hands[id] ?? {})) {
-      next = must(next, { type: 'SET_COUNT', playerId: id, card: card as CardKey, value })
-    }
-    next = must(next, { type: 'CONFIRM_HAND', playerId: id, confirmed: true })
+    if (id === winnerId) continue
+    next = must(next, { type: 'SET_PENALTY', playerId: id, penalty: penalties[id] ?? 0 })
   }
   return must(next, { type: 'CONFIRM_ROUND', at: now() })
 }
@@ -87,10 +85,12 @@ function longGame(rounds = 12): GameState {
   for (let index = 0; index < rounds; index += 1) {
     const winner = `p${(index % 4) + 1}`
     game = playRound(game, winner, {
-      p1: { wild: index % 5, n3: 2, skip: 1 },
-      p2: { wild4: 1, reverse: (index % 3) + 1 },
-      p3: { n9: 2, draw2: 1 },
-      p4: { wild: 1, n1: 3 },
+      // Two wild-type cards, a 3 and a Skip for p1; a wild4 plus 1–3 Reverses
+      // for p2 — expressed the way the screen now takes them: total points.
+      p1: (index % 5) * 40 + 16,
+      p2: 40 + ((index % 3) + 1) * 10,
+      p3: 38,
+      p4: 43,
     })
   }
   return game
@@ -118,12 +118,11 @@ describe('transfer encoding', () => {
 
   it('carries cumulative scores, eliminations, round history and the open round', () => {
     let game = startGame()
-    game = playRound(game, 'p1', { p2: { wild: 1 }, p3: { n5: 1 }, p4: { n2: 2 } })
+    game = playRound(game, 'p1', { p2: 40, p3: 5, p4: 4 })
     // Ben is out at the 40 cutoff; Cara and Ana carry on.
     game = must(game, { type: 'BEGIN_ROUND', at: now() })
     game = must(game, { type: 'SET_WINNER', playerId: 'p3' })
-    game = must(game, { type: 'SET_COUNT', playerId: 'p1', card: 'wild4', value: 2 })
-    game = must(game, { type: 'CONFIRM_HAND', playerId: 'p1', confirmed: true })
+    game = must(game, { type: 'SET_PENALTY', playerId: 'p1', penalty: 80 })
     game = transferable(game)
 
     const encoded = encodeTransfer(game)
@@ -139,13 +138,14 @@ describe('transfer encoding', () => {
     expect(received.players.map((player) => player.cumulativeScore)).toEqual([0, 40, 5, 4])
     expect(received.players.find((player) => player.id === 'p2')?.eliminated).toBe(true)
     expect(received.currentRound?.winnerId).toBe('p3')
-    expect(received.currentRound?.entries.p1.counts.wild4).toBe(2)
-    expect(received.currentRound?.entries.p1.confirmed).toBe(true)
+    expect(received.currentRound?.entries.p1.penalty).toBe(80)
+    // Untouched fields stay untouched across the transfer.
+    expect(received.currentRound?.entries.p4.penalty).toBeNull()
   })
 
   it('carries a finished game and its ending', () => {
     let game = startGame(['Ana', 'Ben', 'Cara'], 1000)
-    game = playRound(game, 'p1', { p2: { n1: 1 } })
+    game = playRound(game, 'p1', { p2: 1 })
     game = must(game, { type: 'END_GAME', at: now(), via: 'manual-end' })
     const encoded = encodeTransfer(transferable(game))
     expect(encoded.ok).toBe(true)
@@ -487,7 +487,7 @@ describe('read-only after handover', () => {
     const game = lockedGame()
     const blocked: GameAction[] = [
       { type: 'BEGIN_ROUND', at: now() },
-      { type: 'SET_COUNT', playerId: 'p1', card: 'wild', value: 1 },
+      { type: 'SET_PENALTY', playerId: 'p1', penalty: 10 },
       { type: 'SET_WINNER', playerId: 'p1' },
       { type: 'CONFIRM_ROUND', at: now() },
       { type: 'END_GAME', at: now(), via: 'manual-end' },
@@ -509,7 +509,7 @@ describe('read-only after handover', () => {
     game = must(game, { type: 'BEGIN_ROUND', at: now() })
     game = transferable(game)
     game = must(game, { type: 'MARK_TRANSFERRED', at: now() })
-    const result = gameReducer(game, { type: 'SET_COUNT', playerId: 'p1', card: 'wild', value: 1 })
+    const result = gameReducer(game, { type: 'SET_PENALTY', playerId: 'p1', penalty: 10 })
     expect(result.error?.code).toBe('GAME_TRANSFERRED')
   })
 
@@ -591,7 +591,7 @@ describe('importing', () => {
     let sender = startGame()
     sender = must(sender, { type: 'BEGIN_ROUND', at: now() })
     sender = must(sender, { type: 'SET_WINNER', playerId: 'p2' })
-    sender = must(sender, { type: 'SET_COUNT', playerId: 'p1', card: 'wild', value: 2 })
+    sender = must(sender, { type: 'SET_PENALTY', playerId: 'p1', penalty: 20 })
     const encoded = encodeTransfer(transferable(sender))
     expect(encoded.ok).toBe(true)
     if (!encoded.ok) return
@@ -606,7 +606,105 @@ describe('importing', () => {
     })
     expect(receiver.currentRound?.winnerId).toBe('p2')
     // The receiving device can finish the round that came across.
-    receiver = must(receiver, { type: 'SET_COUNT', playerId: 'p1', card: 'wild', value: 3 })
-    expect(receiver.currentRound?.entries.p1.counts.wild).toBe(3)
+    receiver = must(receiver, { type: 'SET_PENALTY', playerId: 'p1', penalty: 35 })
+    expect(receiver.currentRound?.entries.p1.penalty).toBe(35)
+  })
+})
+
+describe('legacy transfer codes', () => {
+  const zero = {
+    n0: 0,
+    n1: 0,
+    n2: 0,
+    n3: 0,
+    n4: 0,
+    n5: 0,
+    n6: 0,
+    n7: 0,
+    n8: 0,
+    n9: 0,
+    skip: 0,
+    reverse: 0,
+    draw2: 0,
+    wild: 0,
+    wild4: 0,
+  }
+
+  /** A format-1 packed game: per-card counters instead of typed penalties. */
+  function legacyPacked() {
+    return {
+      v: 1,
+      g: {
+        p: 'a',
+        n: 'Old night',
+        c: 200,
+        s: 10,
+        t: 10,
+        a: 0,
+        e: 1,
+        pl: [
+          ['Ana', 0, 0, null, null],
+          ['Ben', 5, 0, null, null],
+          ['Cara', 0, 0, null, null],
+        ],
+        r: [
+          {
+            n: 1,
+            w: 0,
+            c: 200,
+            f: 20,
+            o: 'c',
+            l: [
+              { p: 0, c: '', n: 0, o: 0, t: 0, w: 1 },
+              { p: 1, c: '5=1', n: 5, o: 0, t: 5, w: 0 },
+              { p: 2, c: '', n: 0, o: 0, t: 0, w: 0 },
+            ],
+            e: [],
+            b: [],
+            tb: null,
+          },
+        ],
+        cr: {
+          k: 'r',
+          n: 2,
+          p: [0, 1, 2],
+          e: [
+            [{ ...zero, wild4: 2 }, 1],
+            [{ ...zero, n7: 3 }, 1],
+            [{ ...zero, wild: 1 }, 0],
+          ],
+          w: 0,
+          tb: null,
+        },
+        tb: null,
+        d: null,
+        en: null,
+      },
+    }
+  }
+
+  it('reads a code sent before penalties were typed in', () => {
+    const game = parseGameState(unpackGame(legacyPacked()))
+
+    expect(game.rounds).toHaveLength(1)
+    expect(game.rounds[0].lines.map((line) => line.penalty)).toEqual([0, 5, 0])
+    expect(game.players.map((player) => player.cumulativeScore)).toEqual([0, 5, 0])
+    // Counters become the totals they used to be worth.
+    expect(game.currentRound?.entries.p1.penalty).toBe(80)
+    expect(game.currentRound?.entries.p2.penalty).toBe(21)
+    expect(game.currentRound?.entries.p3.penalty).toBe(40)
+    expect(game.currentRound?.winnerId).toBe('p1')
+  })
+
+  it('rejects a format-1 code whose card record is damaged', () => {
+    const packed = legacyPacked()
+    packed.g.cr.e[1][0] = { ...zero, n7: -2 }
+    expect(() => parseGameState(unpackGame(packed))).toThrow()
+  })
+
+  it('refuses an unknown packed format', () => {
+    const packed = legacyPacked() as { v: number }
+    packed.v = 99
+    expect(() => unpackGame(packed)).toThrow(/unsupported format/i)
   })
 })

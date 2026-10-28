@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import type { CardKey } from '../cards'
 import { createInitialGameState, gameReducer, type GameAction } from '../reducer'
 import {
   canBeginRound,
@@ -27,13 +26,11 @@ function start(names = ['Ana', 'Ben', 'Cara'], options: { cutoff?: number } = {}
   })
 }
 
-function fill(state: GameState, winnerId: string, counts: Record<string, Partial<Record<CardKey, number>>>) {
+function fill(state: GameState, winnerId: string, penalties: Record<string, number> = {}) {
   let next = must(state, { type: 'SET_WINNER', playerId: winnerId })
   for (const id of next.currentRound?.participants ?? []) {
-    for (const [card, value] of Object.entries(counts[id] ?? {})) {
-      next = must(next, { type: 'SET_COUNT', playerId: id, card: card as CardKey, value: value as number })
-    }
-    next = must(next, { type: 'CONFIRM_HAND', playerId: id, confirmed: true })
+    if (id === winnerId) continue
+    next = must(next, { type: 'SET_PENALTY', playerId: id, penalty: penalties[id] ?? 0 })
   }
   return next
 }
@@ -73,7 +70,7 @@ describe('resolveScreen', () => {
 
   it('forces the tie-break screen but allows the leaderboard', () => {
     let state = must(start(['Ana', 'Ben', 'Cara', 'Dev'], { cutoff: 1 }), { type: 'BEGIN_ROUND', at: 2 })
-    state = fill(state, 'p1', { p2: { wild: 1 }, p3: { wild: 1 } })
+    state = fill(state, 'p1', { p2: 40, p3: 40 })
     state = must(state, { type: 'CONFIRM_ROUND', at: 3 })
     expect(resolveScreen(state, 'results')).toBe('tiebreak')
     expect(resolveScreen(state, 'leaderboard')).toBe('leaderboard')
@@ -81,7 +78,7 @@ describe('resolveScreen', () => {
 
   it('forces the controller decision screen', () => {
     let state = must(start(['Ana', 'Ben', 'Cara'], { cutoff: 1 }), { type: 'BEGIN_ROUND', at: 2 })
-    state = fill(state, 'p1', { p2: { wild: 1 }, p3: { n5: 1 } })
+    state = fill(state, 'p1', { p2: 40, p3: 5 })
     state = must(state, { type: 'CONFIRM_ROUND', at: 3 })
     expect(resolveScreen(state, 'dashboard')).toBe('decision')
     expect(resolveScreen(state, 'leaderboard')).toBe('leaderboard')
@@ -95,7 +92,7 @@ describe('resolveScreen', () => {
 
   it('shows the results screen when a finalized round exists', () => {
     let state = must(start(['Ana', 'Ben', 'Cara'], { cutoff: 999 }), { type: 'BEGIN_ROUND', at: 2 })
-    state = fill(state, 'p1', { p2: { n5: 1 } })
+    state = fill(state, 'p1', { p2: 5 })
     state = must(state, { type: 'CONFIRM_ROUND', at: 3 })
     expect(resolveScreen(state, 'results')).toBe('results')
   })
@@ -113,7 +110,7 @@ describe('canBeginRound', () => {
 
   it('blocks two-player rounds until the table opts in', () => {
     let state = must(start(['Ana', 'Ben', 'Cara'], { cutoff: 1 }), { type: 'BEGIN_ROUND', at: 2 })
-    state = fill(state, 'p1', { p2: { wild: 1 }, p3: { n5: 1 } })
+    state = fill(state, 'p1', { p2: 40, p3: 5 })
     state = must(state, { type: 'CONFIRM_ROUND', at: 3 })
     expect(canBeginRound(state).allowed).toBe(false)
     state = must(state, { type: 'CONTINUE_WITH_TWO_PLAYERS' })
@@ -124,7 +121,7 @@ describe('canBeginRound', () => {
 describe('scorePreview', () => {
   it('zeroes the winner and projects cumulative totals', () => {
     let state = must(start(), { type: 'BEGIN_ROUND', at: 2 })
-    state = fill(state, 'p1', { p1: { wild: 1 }, p2: { wild: 2 }, p3: { n5: 1 } })
+    state = fill(state, 'p1', { p1: 40, p2: 80, p3: 5 })
     const preview = scorePreview(state, state.currentRound!)
     const byId = new Map(preview.lines.map((line) => [line.playerId, line]))
     expect(byId.get('p1')?.penalty).toBe(0)

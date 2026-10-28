@@ -1,6 +1,6 @@
 /** Pure input validation helpers — no React, no side effects. */
 
-import { CARD_KEYS, type RemainingCards } from './cards'
+import type { RoundEntries } from './types'
 
 export const MIN_PLAYERS = 3
 export const MAX_PLAYERS = 7
@@ -8,7 +8,8 @@ export const MAX_NAME_LENGTH = 24
 export const DEFAULT_CUTOFF = 200
 export const MIN_CUTOFF = 1
 export const MAX_CUTOFF = 100000
-export const MAX_CARD_COUNT = 99
+/** Sanity ceiling for a single round's penalty. Far above any real hand. */
+export const MAX_PENALTY = 9999
 
 /** Canonical key used to compare names: trims and lower-cases. */
 export function normalizeName(name: string): string {
@@ -98,29 +99,29 @@ export function validateCutoff(raw: string | number): CutoffValidationResult {
   return { ok: true, value, error: null }
 }
 
-export interface CountParseResult {
+export interface PenaltyParseResult {
   ok: boolean
+  /** `null` while the field is empty — the round simply is not ready yet. */
   value: number | null
   error: string | null
 }
 
 /**
- * Parses a single card-count field. Only non-negative whole numbers are valid.
- * Empty means zero while typing; negatives, decimals and text are rejected.
+ * Parses one penalty field. Empty is allowed while typing (it returns `null`
+ * rather than zero, so an untouched field is never mistaken for a real score);
+ * negatives, decimals and text are rejected.
  */
-export function parseCardCount(raw: string): CountParseResult {
+export function parsePenalty(raw: string): PenaltyParseResult {
   const text = raw.trim()
-  if (text.length === 0) return { ok: true, value: 0, error: null }
-  if (!/^\d+$/.test(text)) {
-    if (text.startsWith('-')) return { ok: false, value: null, error: 'Cannot be negative.' }
-    return { ok: false, value: null, error: 'Use a whole number.' }
-  }
+  if (text.length === 0) return { ok: true, value: null, error: null }
+  if (text.startsWith('-')) return { ok: false, value: null, error: 'Cannot be negative.' }
+  if (!/^\d+$/.test(text)) return { ok: false, value: null, error: 'Use whole numbers only.' }
   const value = Number(text)
   if (!Number.isSafeInteger(value)) {
     return { ok: false, value: null, error: 'That number is too large.' }
   }
-  if (value > MAX_CARD_COUNT) {
-    return { ok: false, value: null, error: `Max ${MAX_CARD_COUNT}.` }
+  if (value > MAX_PENALTY) {
+    return { ok: false, value: null, error: `Max ${MAX_PENALTY}.` }
   }
   return { ok: true, value, error: null }
 }
@@ -129,14 +130,14 @@ export function parseCardCount(raw: string): CountParseResult {
 export const ROUND_ERRORS = {
   noWinner: 'Select the round winner.',
   multipleWinners: 'Only one player can win a round.',
-  missingPlayer: (name: string) => `Record ${name}'s remaining cards and confirm the hand.`,
-  unconfirmedPlayer: (name: string) => `Confirm ${name}'s hand before reviewing the round.`,
-  invalidCount: (name: string) => `Fix ${name}'s card counts. Use whole numbers from 0–${MAX_CARD_COUNT}.`,
+  missingPenalty: (name: string) => `Enter ${name}'s penalty points.`,
+  invalidPenalty: (name: string) =>
+    `Fix ${name}'s penalty — use a whole number from 0 to ${MAX_PENALTY}.`,
 } as const
 
 export interface RoundValidationContext {
   participants: { id: string; name: string }[]
-  entries: Record<string, { counts: RemainingCards; confirmed: boolean } | undefined>
+  entries: RoundEntries
   winnerId: string | null
 }
 
@@ -147,14 +148,14 @@ export interface RoundValidationResult {
 }
 
 /**
- * Validates the current round form. Card counts must exist for every participant,
- * be non-negative whole numbers and be explicitly confirmed. The winner is still
- * validated but their counts cannot change their zero penalty (enforced in rules).
+ * Validates the current round. A round is ready to confirm when exactly one of
+ * its players is the winner and every other player has a whole, non-negative
+ * penalty. The winner needs no entry: their score is always zero.
  */
 export function validateRoundEntry(ctx: RoundValidationContext): RoundValidationResult {
   const errors: string[] = []
   const fieldErrors: Record<string, string> = {}
-  const ids = new Set(ctx.participants.map((p) => p.id))
+  const ids = new Set(ctx.participants.map((player) => player.id))
 
   if (!ctx.winnerId) {
     errors.push(ROUND_ERRORS.noWinner)
@@ -163,27 +164,19 @@ export function validateRoundEntry(ctx: RoundValidationContext): RoundValidation
   }
 
   for (const player of ctx.participants) {
+    if (player.id === ctx.winnerId) continue
     const entry = ctx.entries[player.id]
-    if (!entry) {
-      errors.push(ROUND_ERRORS.missingPlayer(player.name))
-      fieldErrors[player.id] = ROUND_ERRORS.missingPlayer(player.name)
+    if (!entry || entry.penalty === null) {
+      errors.push(ROUND_ERRORS.missingPenalty(player.name))
+      fieldErrors[player.id] = ROUND_ERRORS.missingPenalty(player.name)
       continue
     }
-    const invalidKeys = CARD_KEYS.filter((key) => {
-      const count = entry.counts[key]
-      return !Number.isInteger(count) || count < 0 || count > MAX_CARD_COUNT
-    })
-    if (invalidKeys.length > 0) {
-      errors.push(ROUND_ERRORS.invalidCount(player.name))
-      fieldErrors[player.id] = ROUND_ERRORS.invalidCount(player.name)
-      continue
-    }
-    if (!entry.confirmed) {
-      errors.push(ROUND_ERRORS.unconfirmedPlayer(player.name))
-      fieldErrors[player.id] = ROUND_ERRORS.unconfirmedPlayer(player.name)
+    const penalty = entry.penalty
+    if (!Number.isInteger(penalty) || penalty < 0 || penalty > MAX_PENALTY) {
+      errors.push(ROUND_ERRORS.invalidPenalty(player.name))
+      fieldErrors[player.id] = ROUND_ERRORS.invalidPenalty(player.name)
     }
   }
 
   return { ok: errors.length === 0, errors, fieldErrors }
 }
-

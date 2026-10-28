@@ -13,7 +13,6 @@ import {
   readTransferInput,
 } from '@/game/transfer'
 import { buildTransferDocument } from '@/game/transfer'
-import type { CardKey } from '@/game/cards'
 import type { GameState } from '@/game/types'
 
 vi.setConfig({ testTimeout: 30000 })
@@ -46,15 +45,13 @@ function freshGame(
 function playRound(
   state: GameState,
   winnerId: string,
-  hands: Record<string, Partial<Record<CardKey, number>>> = {},
+  penalties: Record<string, number> = {},
 ): GameState {
   let next = must(state, { type: 'BEGIN_ROUND', at: 2000 })
   next = must(next, { type: 'SET_WINNER', playerId: winnerId })
   for (const id of next.currentRound?.participants ?? []) {
-    for (const [card, value] of Object.entries(hands[id] ?? {})) {
-      next = must(next, { type: 'SET_COUNT', playerId: id, card: card as CardKey, value })
-    }
-    next = must(next, { type: 'CONFIRM_HAND', playerId: id, confirmed: true })
+    if (id === winnerId) continue
+    next = must(next, { type: 'SET_PENALTY', playerId: id, penalty: penalties[id] ?? 0 })
   }
   return must(next, { type: 'CONFIRM_ROUND', at: 3000 })
 }
@@ -187,16 +184,11 @@ describe('read-only behaviour on the old phone', () => {
     const user = userEvent.setup()
     await startFromHome(user)
     await user.click(screen.getByRole('button', { name: /begin round/i }))
-    await screen.findByRole('heading', { name: /count the cards/i })
-    await user.click(screen.getByRole('radio', { name: /ana wins the round/i }))
-    // Hands start collapsed; open Ben's tile before editing it.
-    const benToggle = screen
-      .getAllByRole('button', { expanded: false })
-      .find((button) => (button.textContent ?? '').includes('Ben'))
-    if (benToggle) await user.click(benToggle)
-    const wild = screen.getByLabelText('Wild count for Ben')
-    await user.clear(wild)
-    await user.type(wild, '2')
+    await screen.findByRole('heading', { name: /record the round/i })
+    await user.click(screen.getByRole('button', { name: /ana wins the round/i }))
+    const penalty = screen.getByLabelText('Penalty points for Ben')
+    await user.clear(penalty)
+    await user.type(penalty, '80')
 
     await openTransfer(user)
     await user.click(screen.getByRole('button', { name: /mark as transferred/i }))
@@ -212,11 +204,11 @@ describe('read-only behaviour on the old phone', () => {
     await user.click(screen.getByRole('button', { name: /round snapshot/i }))
 
     expect(await screen.findByRole('heading', { name: /round 1 snapshot/i })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: /count the cards/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /record the round/i })).not.toBeInTheDocument()
     // The frozen numbers are visible, but nothing is editable.
-    expect(screen.getByText(/unconfirmed penalty/i)).toBeInTheDocument()
-    expect(screen.queryByLabelText('Wild count for Ben')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /confirm hand/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/round penalty so far/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Penalty points for Ben')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^confirm round$/i })).not.toBeInTheDocument()
   })
 })
 
@@ -315,7 +307,7 @@ describe('importing on the receiving phone', () => {
     let sender = freshGame()
     sender = must(sender, { type: 'BEGIN_ROUND', at: 2000 })
     sender = must(sender, { type: 'SET_WINNER', playerId: 'player_2' })
-    sender = must(sender, { type: 'SET_COUNT', playerId: 'player_1', card: 'wild', value: 1 })
+    sender = must(sender, { type: 'SET_PENALTY', playerId: 'player_1', penalty: 40 })
 
     await openImport(user)
     await user.type(screen.getByLabelText(/paste a transfer code/i), payloadOf(sender))
@@ -328,9 +320,12 @@ describe('importing on the receiving phone', () => {
     await user.click(within(handover).getByRole('button', { name: /open the game/i }))
 
     // The open round came across and the new phone can keep scoring it.
-    expect(await screen.findByRole('heading', { name: /count the cards/i })).toBeInTheDocument()
-    expect(screen.getByRole('radio', { name: /ben wins the round/i })).toBeChecked()
-    expect(screen.getByLabelText('Wild count for Ana')).toHaveValue('1')
+    expect(await screen.findByRole('heading', { name: /record the round/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /ben wins the round/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(screen.getByLabelText('Penalty points for Ana')).toHaveValue('40')
   })
 
   it('rejects a damaged payload without importing', async () => {
@@ -377,10 +372,10 @@ describe('importing on the receiving phone', () => {
     let sender = freshGame(['Ana', 'Ben', 'Cara', 'Dev'], 100000)
     for (let index = 0; index < 12; index += 1) {
       sender = playRound(sender, `player_${(index % 4) + 1}`, {
-        player_1: { wild: index % 3, n5: 1 },
-        player_2: { wild4: 1, n2: 1 },
-        player_3: { skip: 1, n9: 1 },
-        player_4: { draw2: 1, n1: 1 },
+        player_1: (index % 3) * 40 + 5,
+        player_2: 42,
+        player_3: 19,
+        player_4: 21,
       })
     }
     const encoded = encodeTransfer(sender)

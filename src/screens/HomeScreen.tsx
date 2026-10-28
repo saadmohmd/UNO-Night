@@ -74,7 +74,7 @@ const steps = [
   {
     icon: ListChecks,
     title: 'Log each hand',
-    body: 'Record remaining cards after every physical round.',
+    body: 'Type each player’s penalty points after every round.',
     tone: 'text-uno-yellow border-uno-yellow/25 bg-uno-yellow/10',
   },
   {
@@ -121,7 +121,7 @@ export function HomeScreen({ onNewGame, onImport }: { onNewGame: () => void; onI
               <span className="text-brand">not the math.</span>
             </h1>
             <p className="mt-5 max-w-md text-[15px] leading-relaxed text-muted sm:text-base">
-              One phone on the table. Accurate UNO scores, card-by-card maths and a
+              One phone on the table. Accurate UNO scores, no card-by-card maths and a
               knockout cutoff — without paper, arguments or accounts.
             </p>
             <div className="mt-8 flex w-full max-w-xs flex-col gap-3">

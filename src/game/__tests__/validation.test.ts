@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { emptyRemainingCards } from '../cards'
 import {
   MAX_CUTOFF,
   MAX_NAME_LENGTH,
-  parseCardCount,
+  MAX_PENALTY,
+  parsePenalty,
   validateCutoff,
   validateRoster,
   validateRoundEntry,
@@ -75,16 +75,21 @@ describe('cutoff validation', () => {
   })
 })
 
-describe('card count validation', () => {
+describe('penalty validation', () => {
   it('accepts non-negative whole numbers', () => {
-    expect(parseCardCount('0')).toEqual({ ok: true, value: 0, error: null })
-    expect(parseCardCount(' 12 ').value).toBe(12)
-    expect(parseCardCount('').value).toBe(0)
-    expect(parseCardCount('99').ok).toBe(true)
+    expect(parsePenalty('0')).toEqual({ ok: true, value: 0, error: null })
+    expect(parsePenalty(' 25 ').value).toBe(25)
+    expect(parsePenalty('75').value).toBe(75)
+    expect(parsePenalty(String(MAX_PENALTY)).ok).toBe(true)
+  })
+
+  it('leaves an empty field unset instead of guessing zero', () => {
+    expect(parsePenalty('')).toEqual({ ok: true, value: null, error: null })
+    expect(parsePenalty('   ').value).toBeNull()
   })
 
   it('rejects negatives with a clear message', () => {
-    expect(parseCardCount('-1')).toEqual({
+    expect(parsePenalty('-1')).toEqual({
       ok: false,
       value: null,
       error: 'Cannot be negative.',
@@ -92,13 +97,14 @@ describe('card count validation', () => {
   })
 
   it('rejects decimal and non-numeric input', () => {
-    expect(parseCardCount('1.5').ok).toBe(false)
-    expect(parseCardCount('two').ok).toBe(false)
-    expect(parseCardCount('2e3').ok).toBe(false)
+    expect(parsePenalty('1.5').ok).toBe(false)
+    expect(parsePenalty('two').ok).toBe(false)
+    expect(parsePenalty('2e3').ok).toBe(false)
+    expect(parsePenalty('25 pts').ok).toBe(false)
   })
 
-  it('rejects values above the per-card maximum', () => {
-    expect(parseCardCount('100').ok).toBe(false)
+  it('rejects values above the maximum', () => {
+    expect(parsePenalty(String(MAX_PENALTY + 1)).ok).toBe(false)
   })
 })
 
@@ -108,8 +114,8 @@ describe('round entry validation', () => {
     { id: 'b', name: 'Ben' },
   ]
   const entries = {
-    a: { counts: emptyRemainingCards(), confirmed: true },
-    b: { counts: emptyRemainingCards(), confirmed: true },
+    a: { penalty: 0 },
+    b: { penalty: 15 },
   }
 
   it('accepts a complete round with one winner', () => {
@@ -127,33 +133,45 @@ describe('round entry validation', () => {
     expect(result.ok).toBe(false)
   })
 
-  it('reports missing player entries', () => {
+  it('ignores the winner’s own entry, which is always zero', () => {
     const result = validateRoundEntry({
       participants,
-      entries: { a: entries.a },
+      entries: { b: { penalty: 15 } },
+      winnerId: 'a',
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it('reports a missing penalty for a non-winning player', () => {
+    const result = validateRoundEntry({
+      participants,
+      entries: { a: { penalty: 0 } },
       winnerId: 'a',
     })
     expect(result.ok).toBe(false)
-    expect(result.errors.join(' ')).toMatch(/Ben.*remaining cards/i)
+    expect(result.errors.join(' ')).toMatch(/Ben.*penalty points/i)
+    expect(result.fieldErrors.b).toBeTruthy()
   })
 
-  it('requires hands to be explicitly confirmed', () => {
+  it('treats a cleared field as missing, not as zero', () => {
     const result = validateRoundEntry({
       participants,
-      entries: { a: entries.a, b: { ...entries.b, confirmed: false } },
+      entries: { a: { penalty: 0 }, b: { penalty: null } },
       winnerId: 'a',
     })
     expect(result.ok).toBe(false)
-    expect(result.errors.join(' ')).toMatch(/confirm Ben/i)
+    expect(result.errors.join(' ')).toMatch(/Ben/i)
   })
 
-  it('rejects negative, decimal and oversized counts', () => {
-    const bad = {
-      a: { counts: { ...emptyRemainingCards(), wild: -1 }, confirmed: true },
-      b: { counts: { ...emptyRemainingCards(), skip: 1.5 }, confirmed: true },
-    } as typeof entries
-    const result = validateRoundEntry({ participants, entries: bad, winnerId: 'a' })
-    expect(result.ok).toBe(false)
-    expect(result.errors.join(' ')).toMatch(/whole numbers/i)
+  it('rejects negative, decimal and oversized penalties', () => {
+    for (const penalty of [-1, 1.5, MAX_PENALTY + 1]) {
+      const result = validateRoundEntry({
+        participants,
+        entries: { a: { penalty: 0 }, b: { penalty } },
+        winnerId: 'a',
+      })
+      expect(result.ok, String(penalty)).toBe(false)
+      expect(result.errors.join(' ')).toMatch(/whole number/i)
+    }
   })
 })

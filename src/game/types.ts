@@ -1,5 +1,3 @@
-import type { HandEntries, RemainingCards } from './cards'
-
 export interface GameConfig {
   name: string
   cutoff: number
@@ -18,8 +16,21 @@ export interface PlayerRecord {
 export type RoundKind = 'round' | 'tie-break'
 
 /**
- * The round currently being recorded. It exists only while card counts are
- * being entered; confirming it applies the scores and clears this object.
+ * One player's entry in the round being recorded. The operator types the total
+ * penalty directly, so nothing here depends on individual cards.
+ *
+ * `null` means "not entered yet" and is what blocks round confirmation. The
+ * winner's entry is ignored by the rules and always scores zero.
+ */
+export interface RoundEntry {
+  penalty: number | null
+}
+
+export type RoundEntries = Record<string, RoundEntry>
+
+/**
+ * The round currently being recorded. It exists only while penalties are being
+ * entered; confirming it applies the scores and clears this object.
  */
 export interface CurrentRound {
   id: string
@@ -27,7 +38,7 @@ export interface CurrentRound {
   /** For tie-break rounds this stays equal to the source round number. */
   roundNumber: number
   participants: string[]
-  entries: HandEntries
+  entries: RoundEntries
   winnerId: string | null
   /** The tied group this round is resolving, when kind === 'tie-break'. */
   tieBreakPlayerIds: string[] | null
@@ -37,8 +48,7 @@ export interface CurrentRound {
 export interface RoundScoreLine {
   playerId: string
   name: string
-  counts: RemainingCards
-  totalCards: number
+  /** Points added to the cumulative total (always 0 for the round winner). */
   penalty: number
   previousTotal: number
   newTotal: number
@@ -57,8 +67,6 @@ export interface EliminationRecord {
 }
 
 export interface TieBreakHand {
-  counts: RemainingCards
-  totalCards: number
   penalty: number
 }
 
