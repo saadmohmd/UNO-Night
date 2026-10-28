@@ -231,6 +231,7 @@ describe('saving and loading', () => {
         'rounds',
         'startedAt',
         'tieBreak',
+        'transfer',
       ].sort(),
     )
     const players = saved.players as Record<string, unknown>[]

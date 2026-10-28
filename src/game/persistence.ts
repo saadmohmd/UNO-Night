@@ -26,6 +26,7 @@ import type {
   GameEnding,
   GamePhase,
   GameState,
+  GameTransfer,
   PlayerRecord,
   RoundKind,
   RoundOutcome,
@@ -360,7 +361,7 @@ function parsePlayers(value: unknown): PlayerRecord[] {
   return players
 }
 
-function parseGame(value: unknown): GameState {
+export function parseGameState(value: unknown): GameState {
   const source = record(value, 'game')
   const phase = oneOf(source.phase, 'game phase', GAME_PHASES)
   if (phase === 'idle') reject('the saved game has not started')
@@ -446,6 +447,16 @@ function parseGame(value: unknown): GameState {
         at: integer(ending.at, 'ending time', { max: 9_999_999_999_999 }),
       }
     }),
+    transfer: maybe(source.transfer, (entry): GameTransfer => {
+      const transfer = record(entry, 'transfer')
+      const id = text(transfer.id, 'transfer id', { max: MAX_ID_LENGTH })
+      return {
+        id,
+        lockedAt: maybe(transfer.lockedAt, (item) =>
+          integer(item, 'transfer lock time', { min: 0, max: 9_999_999_999_999 }),
+        ),
+      }
+    }),
     allowTwoPlayerRounds: bool(source.allowTwoPlayerRounds, 'two-player setting'),
     nextEliminationOrder: integer(source.nextEliminationOrder, 'elimination counter', {
       min: 1,
@@ -470,7 +481,7 @@ export function parseSavedGame(value: unknown): { game: GameState; savedAt: numb
     throw new OutdatedSave(`save version ${version}`)
   }
   const savedAt = integer(source.savedAt, 'save time', { min: 0, max: 9_999_999_999_999 })
-  return { game: parseGame(source.game), savedAt }
+  return { game: parseGameState(source.game), savedAt }
 }
 
 /**

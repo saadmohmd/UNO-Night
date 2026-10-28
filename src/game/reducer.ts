@@ -47,6 +47,9 @@ export type GameErrorCode =
   | 'INVALID_PLAYER'
   | 'INVALID_COUNT'
   | 'INVALID_TIE_BREAK_PHASE'
+  | 'GAME_TRANSFERRED'
+  | 'TRANSFER_ALREADY_DONE'
+  | 'INVALID_TRANSFER'
 
 export interface GameError {
   code: GameErrorCode
@@ -72,6 +75,10 @@ export type GameAction =
   | { type: 'CONTINUE_WITH_TWO_PLAYERS' }
   | { type: 'END_GAME'; at: number; via?: 'controller-end' | 'manual-end' }
   | { type: 'DECLARE_CHAMPION'; playerId: string; at: number }
+  | { type: 'BEGIN_TRANSFER'; id: string; at: number }
+  | { type: 'CANCEL_TRANSFER' }
+  | { type: 'MARK_TRANSFERRED'; at: number }
+  | { type: 'IMPORT_GAME'; game: GameState; at: number }
   | { type: 'RESET_GAME' }
 
 export function createInitialGameState(): GameState {
@@ -87,6 +94,7 @@ export function createInitialGameState(): GameState {
     allowTwoPlayerRounds: false,
     nextEliminationOrder: 1,
     startedAt: null,
+    transfer: null,
   }
 }
 
@@ -212,8 +220,77 @@ function settleAfterElimination(
   }
 }
 
+/** Actions that may still run on a game locked by a completed handover. */
+const ALLOWED_WHEN_TRANSFERRED: ReadonlySet<GameAction['type']> = new Set([
+  'RESET_GAME',
+  'IMPORT_GAME',
+  'MARK_TRANSFERRED',
+])
+
 export function gameReducer(state: GameState, action: GameAction): GameActionResult {
+  // A handed-over game is a frozen copy: no scoring, no rounds, no ending.
+  if (state.transfer?.lockedAt && !ALLOWED_WHEN_TRANSFERRED.has(action.type)) {
+    return fail(
+      state,
+      'GAME_TRANSFERRED',
+      'This game was transferred to another phone, so it is read-only here.',
+    )
+  }
+
   switch (action.type) {
+    case 'BEGIN_TRANSFER': {
+      if (!state.config || state.phase === 'idle') {
+        return fail(state, 'INVALID_PHASE', 'Start a game before transferring it.')
+      }
+      if (state.transfer?.lockedAt) {
+        return fail(
+          state,
+          'TRANSFER_ALREADY_DONE',
+          'This game was already transferred and is read-only here.',
+        )
+      }
+      if (state.transfer) return ok(state)
+      const id = action.id.trim()
+      if (!/^[\w-]{4,64}$/.test(id)) {
+        return fail(state, 'INVALID_TRANSFER', 'The transfer could not be prepared.')
+      }
+      return ok({ ...state, transfer: { id, lockedAt: null } })
+    }
+
+    case 'CANCEL_TRANSFER': {
+      if (!state.transfer) return ok(state)
+      if (state.transfer.lockedAt) {
+        return fail(
+          state,
+          'TRANSFER_ALREADY_DONE',
+          'This game was already transferred and cannot be unlocked.',
+        )
+      }
+      return ok({ ...state, transfer: null })
+    }
+
+    case 'MARK_TRANSFERRED': {
+      if (!state.transfer) {
+        return fail(state, 'INVALID_TRANSFER', 'Start a transfer before confirming a handover.')
+      }
+      if (state.transfer.lockedAt) {
+        return fail(state, 'TRANSFER_ALREADY_DONE', 'This game is already marked as transferred.')
+      }
+      return ok({ ...state, transfer: { ...state.transfer, lockedAt: action.at } })
+    }
+
+    case 'IMPORT_GAME': {
+      const incoming = action.game
+      if (!incoming.config || incoming.phase === 'idle') {
+        return fail(state, 'INVALID_TRANSFER', 'That transfer does not contain a game.')
+      }
+      if (incoming.players.length < 3 || incoming.players.length > 7) {
+        return fail(state, 'INVALID_TRANSFER', 'A transferred game needs 3–7 players.')
+      }
+      // The receiver takes over: it owns the game from now on, with no lock.
+      return ok({ ...incoming, transfer: null })
+    }
+
     case 'START_GAME': {
       if (state.phase !== 'idle') {
         return fail(state, 'INVALID_PHASE', 'A game is already in progress. Reset it before starting a new one.')

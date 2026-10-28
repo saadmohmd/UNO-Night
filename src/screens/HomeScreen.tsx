@@ -6,6 +6,7 @@ import {
   Gavel,
   HandCoins,
   ListChecks,
+  ScanLine,
   Sparkles,
   Users,
 } from 'lucide-react'
@@ -91,7 +92,7 @@ const scoring = [
   { label: 'Wild / +4', value: '40 pts', tone: 'text-uno-red' },
 ]
 
-export function HomeScreen({ onNewGame }: { onNewGame: () => void }) {
+export function HomeScreen({ onNewGame, onImport }: { onNewGame: () => void; onImport: () => void }) {
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
       <div className="pointer-events-none absolute inset-0 -z-10">
@@ -128,6 +129,12 @@ export function HomeScreen({ onNewGame }: { onNewGame: () => void }) {
                 New Game
                 <ArrowRight className="size-5 transition-transform group-hover:translate-x-0.5" />
               </Button>
+              <Button size="lg" variant="outline" onClick={onImport} className="w-full">
+                <ScanLine className="size-4" /> Import game
+              </Button>
+              <p className="text-center text-[11px] leading-relaxed text-faint">
+                Take over a game from another phone with a QR code or a game file.
+              </p>
               <div className="flex items-center justify-center gap-2.5 text-[11px] text-faint">
                 <span className="inline-flex items-center gap-1">
                   <Users className="size-3.5" /> 3–7 players

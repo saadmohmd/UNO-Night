@@ -26,6 +26,17 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        // Keep the framework and UI primitives cacheable across app releases.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('@radix-ui')) return 'radix'
+          if (id.includes('/react') || id.includes('/scheduler')) return 'react'
+          return undefined
+        },
+      },
+    },
   },
   test: {
     environment: 'jsdom',

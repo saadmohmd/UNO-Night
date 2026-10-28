@@ -11,16 +11,33 @@ export type Screen =
   | 'decision'
   | 'final'
   | 'leaderboard'
+  | 'transfer'
+  | 'import'
 
 /**
  * A round being recorded always owns the screen. Unresolved ties and controller
  * decisions block play until they are handled, so they also force their screen.
  */
 export function resolveScreen(game: GameState, requested: Screen): Screen {
+  // Handover screens are their own destinations: a transfer can start at any
+  // point (even mid-round) and an import can replace whatever is on this phone.
+  if (requested === 'import') return 'import'
+  if (requested === 'transfer') return game.config ? 'transfer' : 'home'
+
   if (!game.config || game.phase === 'idle') {
     return requested === 'setup' ? 'setup' : 'home'
   }
   if (game.phase === 'finished') return 'final'
+
+  // A handed-over copy is read-only, so it does not force the entry screen:
+  // the table can still browse its frozen dashboard, board and results.
+  if (game.transfer?.lockedAt) {
+    if (requested === 'home' || requested === 'setup' || requested === 'tiebreak' || requested === 'decision') {
+      return 'dashboard'
+    }
+    if (requested === 'results' && game.rounds.length === 0) return 'dashboard'
+    return requested
+  }
 
   if (game.currentRound) return 'entry'
 
@@ -65,6 +82,9 @@ export function scorePreview(game: GameState, round: CurrentRound): ScorePreview
 
 export function canBeginRound(game: GameState): { allowed: boolean; reason: string | null } {
   if (game.phase !== 'active') return { allowed: false, reason: 'No active game.' }
+  if (game.transfer?.lockedAt) {
+    return { allowed: false, reason: 'This game was transferred — it is read-only here.' }
+  }
   if (game.currentRound) return { allowed: false, reason: 'A round is already open.' }
   if (game.tieBreak) return { allowed: false, reason: 'Resolve the tie-break first.' }
   if (game.decision) return { allowed: false, reason: 'Decide how to continue first.' }

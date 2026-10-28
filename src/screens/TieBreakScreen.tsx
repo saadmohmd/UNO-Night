@@ -33,6 +33,9 @@ export function TieBreakScreen({
   onLeaderboard,
   onEndGame,
   onReset,
+  onTransfer,
+  onImport,
+  readOnly = false,
 }: {
   game: GameState
   onReplay: () => void
@@ -41,6 +44,9 @@ export function TieBreakScreen({
   onLeaderboard: () => void
   onEndGame: () => void
   onReset: () => void
+  onTransfer?: () => void
+  onImport?: () => void
+  readOnly?: boolean
 }) {
   const [manualOpen, setManualOpen] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
@@ -63,6 +69,9 @@ export function TieBreakScreen({
           onLeaderboard={onLeaderboard}
           onEndGame={onEndGame}
           onReset={onReset}
+          onTransfer={onTransfer}
+          onImport={onImport}
+          readOnly={readOnly}
         />
       }
     >
@@ -109,7 +118,7 @@ export function TieBreakScreen({
               The tied players play one more hand. Lowest penalty survives; the highest
               penalty is knocked out. Cumulative totals stay exactly as they are.
             </p>
-            <Button className="mt-4 w-full" onClick={onReplay}>
+            <Button className="mt-4 w-full" onClick={onReplay} disabled={readOnly}>
               Play tie-break hand <ArrowRight className="size-4" />
             </Button>
           </div>
@@ -122,7 +131,12 @@ export function TieBreakScreen({
               Already settled it another way? Record who is out. The app never picks
               for you and no scores are changed.
             </p>
-            <Button variant="secondary" className="mt-4 w-full" onClick={() => setManualOpen(true)}>
+            <Button
+              variant="secondary"
+              className="mt-4 w-full"
+              onClick={() => setManualOpen(true)}
+              disabled={readOnly}
+            >
               Resolve manually
             </Button>
           </div>

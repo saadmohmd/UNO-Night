@@ -34,6 +34,9 @@ export function RoundResultsScreen({
   onLeaderboard,
   onEndGame,
   onReset,
+  onTransfer,
+  onImport,
+  readOnly = false,
 }: {
   game: GameState
   onNextRound: () => void
@@ -41,6 +44,9 @@ export function RoundResultsScreen({
   onLeaderboard: () => void
   onEndGame: () => void
   onReset: () => void
+  onTransfer?: () => void
+  onImport?: () => void
+  readOnly?: boolean
 }) {
   const round = latestRound(game)
   if (!round || !game.config) return null
@@ -59,6 +65,9 @@ export function RoundResultsScreen({
           onLeaderboard={onLeaderboard}
           onEndGame={onEndGame}
           onReset={onReset}
+          onTransfer={onTransfer}
+          onImport={onImport}
+          readOnly={readOnly}
         />
       }
     >

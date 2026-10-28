@@ -9,6 +9,9 @@ import { LeaderboardScreen } from '@/screens/LeaderboardScreen'
 import { TieBreakScreen } from '@/screens/TieBreakScreen'
 import { DecisionScreen } from '@/screens/DecisionScreen'
 import { FinalScreen } from '@/screens/FinalScreen'
+import { TransferScreen } from '@/screens/TransferScreen'
+import { TransferredRoundScreen } from '@/screens/TransferredRoundScreen'
+import { ImportScreen } from '@/screens/ImportScreen'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { createInitialGameState, gameStoreReducer } from '@/game/reducer'
 import type { GameAction, GameStore } from '@/game/reducer'
@@ -16,6 +19,7 @@ import { clearSavedGame, loadSavedGame, saveGame, type LoadResult } from '@/game
 import { resolveScreen, type Screen } from '@/game/selectors'
 import { useBeforeUnload } from '@/hooks/useBeforeUnload'
 import { createId } from '@/lib/id'
+import type { GameState } from '@/game/types'
 import { cn, formatTime } from '@/lib/utils'
 
 /** Reads this device's saved game once, before the first render. */
@@ -45,6 +49,8 @@ export default function App() {
   const { game, error } = store
   const screen = resolveScreen(game, route)
   const isActive = game.phase === 'active'
+  /** A completed handover freezes this copy: no scoring, no round changes. */
+  const readOnly = Boolean(game.transfer?.lockedAt)
 
   // The saved copy is now the safety net, so only warn on leaving when saving
   // is actually unavailable — otherwise the prompt would be a lie.
@@ -102,6 +108,7 @@ export default function App() {
   const goDashboard = () => setRoute('dashboard')
   const goLeaderboard = () => setRoute('leaderboard')
   const goResults = () => setRoute('results')
+  const goImport = () => setRoute('import')
 
   const requireName =
     game.currentRound?.participants
@@ -163,6 +170,27 @@ export default function App() {
     setRoute('results')
   }
 
+  /** Opens the handover screen, minting a transfer id the first time. */
+  function startTransfer() {
+    if (!game.transfer) {
+      dispatch({ type: 'BEGIN_TRANSFER', id: createId('tx'), at: Date.now() })
+    }
+    setRoute('transfer')
+  }
+
+  /** Called only after the operator confirms the code from the receiving phone. */
+  function markTransferred() {
+    dispatch({ type: 'MARK_TRANSFERRED', at: Date.now() })
+    setRoute('transfer')
+  }
+
+  /** Replaces this device's game with a validated transfer. */
+  function importGame(incoming: GameState) {
+    dispatch({ type: 'IMPORT_GAME', game: incoming, at: Date.now() })
+    setRestoredAt(null)
+    setRestoreError(null)
+  }
+
   function endGame() {
     setConfirm(null)
     dispatch({ type: 'END_GAME', at: Date.now(), via: 'manual-end' })
@@ -222,11 +250,14 @@ export default function App() {
   const gameChrome = {
     game,
     dispatch,
+    readOnly,
     onDashboard: goDashboard,
     onLeaderboard: goLeaderboard,
     onResults: goResults,
     onEndGame: () => setConfirm('end-game'),
     onReset: () => setConfirm('reset'),
+    onTransfer: startTransfer,
+    onImport: goImport,
   }
 
   return (
@@ -244,7 +275,9 @@ export default function App() {
       </a>
 
       <div id="main-content">
-        {screen === 'home' && <HomeScreen onNewGame={() => setRoute('setup')} />}
+        {screen === 'home' && (
+          <HomeScreen onNewGame={() => setRoute('setup')} onImport={goImport} />
+        )}
 
         {screen === 'setup' && (
           <SetupScreen onStart={startGame} onBack={() => setRoute('home')} />
@@ -256,16 +289,26 @@ export default function App() {
             onBeginRound={beginRound}
             onDashboard={goDashboard}
             onLeaderboard={goLeaderboard}
+            onSnapshot={() => setRoute('entry')}
           />
         )}
 
-        {screen === 'entry' && (
-          <ScoreEntryScreen
-            {...gameChrome}
-            onDiscardRound={discardRound}
-            onRoundConfirmed={showRoundResults}
-          />
-        )}
+        {screen === 'entry' &&
+          (readOnly ? (
+            <TransferredRoundScreen
+              game={game}
+              onDashboard={goDashboard}
+              onLeaderboard={goLeaderboard}
+              onReset={() => setConfirm('reset')}
+              onImport={goImport}
+            />
+          ) : (
+            <ScoreEntryScreen
+              {...gameChrome}
+              onDiscardRound={discardRound}
+              onRoundConfirmed={showRoundResults}
+            />
+          ))}
 
         {screen === 'results' && (
           <RoundResultsScreen {...gameChrome} onNextRound={beginRound} />
@@ -293,6 +336,24 @@ export default function App() {
             {...gameChrome}
             onContinueWithTwo={continueWithTwo}
             onEndGameDecision={endGameFromDecision}
+          />
+        )}
+
+        {screen === 'transfer' && (
+          <TransferScreen
+            {...gameChrome}
+            onBack={goDashboard}
+            onMarkTransferred={markTransferred}
+          />
+        )}
+
+        {screen === 'import' && (
+          <ImportScreen
+            hasLocalGame={game.phase !== 'idle'}
+            localGamePhase={game.phase}
+            onImported={importGame}
+            onCancel={() => setRoute(game.phase === 'idle' ? 'home' : 'dashboard')}
+            onOpenGame={() => setRoute('dashboard')}
           />
         )}
 

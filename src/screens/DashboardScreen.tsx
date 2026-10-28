@@ -28,6 +28,10 @@ export function DashboardScreen({
   onResults,
   onEndGame,
   onReset,
+  onTransfer,
+  onImport,
+  onSnapshot,
+  readOnly = false,
 }: {
   game: GameState
   onBeginRound: () => void
@@ -36,6 +40,11 @@ export function DashboardScreen({
   onResults: () => void
   onEndGame: () => void
   onReset: () => void
+  onTransfer?: () => void
+  onImport?: () => void
+  /** Read-only copies can still open the frozen round that was mid-entry. */
+  onSnapshot?: () => void
+  readOnly?: boolean
 }) {
   if (!game.config) return null
   const active = game.players.filter((player) => !player.eliminated)
@@ -60,6 +69,9 @@ export function DashboardScreen({
           onLeaderboard={onLeaderboard}
           onEndGame={onEndGame}
           onReset={onReset}
+          onTransfer={onTransfer}
+          onImport={onImport}
+          readOnly={readOnly}
         />
       }
     >
@@ -269,6 +281,18 @@ export function DashboardScreen({
           <Trophy className="size-4" />
           <span className="hidden sm:inline">Leaderboard</span>
         </Button>
+        {readOnly && game.currentRound && onSnapshot && (
+          <Button
+            variant="secondary"
+            size="lg"
+            onClick={onSnapshot}
+            className="px-3"
+            aria-label="Round snapshot"
+          >
+            <ListOrdered className="size-4" />
+            <span className="hidden sm:inline">Snapshot</span>
+          </Button>
+        )}
         <Button size="lg" onClick={onBeginRound} disabled={!gate.allowed} className="min-w-32">
           <Play className="size-4" />
           Begin round

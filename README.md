@@ -5,6 +5,7 @@ on the table; everyone records the cards left in their hand after each round and
 handles the maths and the knockout cutoff.
 
 - 100% client-side. No backend, no accounts, no database, no network calls after load.
+- Games move between phones with QR codes or a JSON file — a one-time handover, never a sync.
 - The game in progress is saved in this browser on this device, so a refresh, a closed tab
   or a browser restart picks up exactly where the table left off.
 - React 19 + TypeScript + Vite + Tailwind CSS v4, with shadcn-style primitives built on
@@ -67,6 +68,58 @@ Storage can be unavailable (private mode, disabled site data, a full quota). The
 working and shows a "Saving is off" notice; only then does it fall back to the browser's
 leave-warning while a game is active.
 
+## QR game transfer
+
+Move a game from one phone to another without a server.
+
+**On the old phone:** game menu ▸ *Transfer game*. The whole game is captured — players,
+cumulative scores, cutoff, every confirmed round, eliminations, tie-break state and any open
+round with its card counts. It is encoded, compressed and shown as a QR code (or a set of
+labelled parts), alongside a *Save game file* button.
+
+**On the new phone:** *Import game* (home screen, or the game menu). Scan the code with the
+camera, or paste/upload the file. The app validates the transfer and shows a preview — game
+name, cutoff, every score, eliminations and the state of the current round. Nothing is
+written until you confirm, and an existing game on that phone is only replaced after a second
+confirmation.
+
+**Two-step handover.** The phones never talk to each other, so the handover is finished by
+hand: after importing, the receiving phone shows a six-character code, and the old phone is
+locked to read-only when that code is entered there (game menu ▸ *Transfer game* ▸ *Mark as
+transferred*). Until then the old phone stays editable. If the code is lost, a clearly
+warned "mark without verification" path exists.
+
+**What read-only means.** After the handover the old phone keeps a frozen copy it can still
+read — dashboard, leaderboard, history and any unfinished round (the dashboard offers a
+*Round snapshot* button while a round was mid-entry) — but every mutation is
+refused by the game engine itself (not just hidden in the UI): no scoring, no round
+finalisation, no endings, no second transfer. Discarding the local copy is still allowed.
+
+### Capacity and integrity
+
+| Situation | What happens |
+| --- | --- |
+| Payload fits one code (≤ 1100 characters) | One QR code, marked *Single code* |
+| Longer game | Labelled parts: `Part 2 of 5`, one code at a time, scanned in any order |
+| More than 24 codes would be needed | Refused with a clear message — use the game file. History is never truncated |
+| Missing / repeated / corrupted part | Reported per part; a repeated part is ignored, a damaged set will not assemble |
+| Foreign part (another transfer) | Refused so two handovers cannot be mixed |
+| File import | Same payload plus a checksum; a tampered or truncated file is rejected |
+
+A typical four-player game fits a single code up to roughly six confirmed rounds; a 12-round
+game needs two, and 40 rounds about three.
+
+Everything is validated on arrival: envelope version, handover id, then the game itself
+through the same field-by-field validator used for saved games — 3–7 players, whole-number
+scores and card counts, cutoff range, consistent eliminations, and player references inside
+every round, hand and tie-break. Invalid transfers never reach the app state.
+
+**Honest limitations.** This is a snapshot, not live synchronisation: two offline phones
+cannot confirm each other, and scores entered on the old phone after the handover are simply
+ignored (they never travel). The security is a six-character code and human care — it
+prevents accidents, not a determined person. Loading a transfer replaces whatever is on the
+receiving phone, so that confirmation is deliberate.
+
 ## The game
 
 ### Setup
@@ -128,11 +181,13 @@ src/
     reducer.ts      the game state machine (all mutations validated)
     selectors.ts    screen resolution and derived view data
     persistence.ts  versioned localStorage save, validation and clearing
+    transfer.ts     QR payloads, part splitting, checksums, handover codes
+    transferCodec.ts compact game projection used by the QR payload
     __tests__/      unit tests for every rule above
-  components/      design system + game UI pieces
-  screens/         Home, Setup, Dashboard, Score Entry, Results,
-                   Leaderboard, Tie-break, Decision, Final
-  hooks/           beforeunload guard (used only when saving is unavailable)
+  components/      design system + game UI pieces (incl. transfer/QrCode)
+  screens/         Home, Setup, Dashboard, Score Entry, Results, Leaderboard,
+                   Tie-break, Decision, Final, Transfer, Import
+  hooks/           beforeunload guard, camera QR scanner (jsQR)
   __tests__/       full user-journey and persistence tests
 ```
 
@@ -140,6 +195,10 @@ src/
 
 - Saves are per browser profile and per device. Two tabs of the same game are not synced —
   the last write wins — and clearing site data deletes the saved game.
+- QR transfer is a handover, not a sync: the two phones never share state, and the old phone
+  is only frozen when someone confirms the code on it.
+- The camera needs `https://` (or `localhost`). Over plain HTTP on a LAN the scanner falls
+  back automatically to the file/paste import.
 - A save from an incompatible version is discarded rather than migrated; the app never runs
   on data it does not understand.
 - The `beforeunload` warning only arms when saving is unavailable, and it is best-effort:

@@ -123,6 +123,19 @@ export interface GameEnding {
 
 export type GamePhase = 'idle' | 'active' | 'finished'
 
+/**
+ * Handover bookkeeping for a QR transfer started on this device.
+ *
+ * The id is generated when the table starts a transfer and travels inside the
+ * QR code, which lets the receiving phone show a short code derived from it.
+ * `lockedAt` is only set when a human confirms that handover, and from then on
+ * the game is read-only here.
+ */
+export interface GameTransfer {
+  id: string
+  lockedAt: number | null
+}
+
 export interface GameState {
   phase: GamePhase
   config: GameConfig | null
@@ -135,6 +148,8 @@ export interface GameState {
   allowTwoPlayerRounds: boolean
   nextEliminationOrder: number
   startedAt: number | null
+  /** Set while this game is being (or has been) handed over to another device. */
+  transfer: GameTransfer | null
 }
 
 export interface PlayerSeed {

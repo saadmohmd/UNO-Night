@@ -94,11 +94,17 @@ export function LeaderboardScreen({
   onDashboard,
   onEndGame,
   onReset,
+  onTransfer,
+  onImport,
+  readOnly = false,
 }: {
   game: GameState
   onDashboard: () => void
   onEndGame: () => void
   onReset: () => void
+  onTransfer?: () => void
+  onImport?: () => void
+  readOnly?: boolean
 }) {
   const [tab, setTab] = useState('standings')
   if (!game.config) return null
@@ -118,6 +124,9 @@ export function LeaderboardScreen({
           onLeaderboard={() => undefined}
           onEndGame={onEndGame}
           onReset={onReset}
+          onTransfer={onTransfer}
+          onImport={onImport}
+          readOnly={readOnly}
         />
       }
     >

@@ -175,6 +175,9 @@ export function ScoreEntryScreen({
   onReset,
   onDiscardRound,
   onRoundConfirmed,
+  onTransfer,
+  onImport,
+  readOnly = false,
 }: {
   game: GameState
   dispatch: Dispatch<GameAction>
@@ -182,6 +185,9 @@ export function ScoreEntryScreen({
   onLeaderboard: () => void
   onEndGame: () => void
   onReset: () => void
+  onTransfer?: () => void
+  onImport?: () => void
+  readOnly?: boolean
   onDiscardRound: () => void
   onRoundConfirmed: () => void
 }) {
@@ -259,6 +265,9 @@ export function ScoreEntryScreen({
           onLeaderboard={onLeaderboard}
           onEndGame={onEndGame}
           onReset={onReset}
+          onTransfer={onTransfer}
+          onImport={onImport}
+          readOnly={readOnly}
         />
       }
     >

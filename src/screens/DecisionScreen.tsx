@@ -18,6 +18,9 @@ export function DecisionScreen({
   onLeaderboard,
   onEndGame,
   onReset,
+  onTransfer,
+  onImport,
+  readOnly = false,
 }: {
   game: GameState
   onContinueWithTwo: () => void
@@ -26,6 +29,9 @@ export function DecisionScreen({
   onLeaderboard: () => void
   onEndGame: () => void
   onReset: () => void
+  onTransfer?: () => void
+  onImport?: () => void
+  readOnly?: boolean
 }) {
   const [continueOpen, setContinueOpen] = useState(false)
   const [endOpen, setEndOpen] = useState(false)
@@ -48,6 +54,9 @@ export function DecisionScreen({
           onLeaderboard={onLeaderboard}
           onEndGame={onEndGame}
           onReset={onReset}
+          onTransfer={onTransfer}
+          onImport={onImport}
+          readOnly={readOnly}
         />
       }
     >
@@ -94,7 +103,11 @@ export function DecisionScreen({
               Waive the 3-player minimum for this game and keep scoring. The house
               rule stays on until the night ends.
             </p>
-            <Button className="mt-4 w-full" onClick={() => setContinueOpen(true)}>
+            <Button
+              className="mt-4 w-full"
+              onClick={() => setContinueOpen(true)}
+              disabled={readOnly}
+            >
               Continue with 2 <ArrowRight className="size-4" />
             </Button>
           </div>
@@ -107,7 +120,12 @@ export function DecisionScreen({
               Record final standings now. The lowest remaining score wins if it is
               unique; otherwise the game ends with an unresolved tie.
             </p>
-            <Button variant="secondary" className="mt-4 w-full" onClick={() => setEndOpen(true)}>
+            <Button
+              variant="secondary"
+              className="mt-4 w-full"
+              onClick={() => setEndOpen(true)}
+              disabled={readOnly}
+            >
               End game
             </Button>
           </div>
