@@ -8,6 +8,7 @@ points and the app handles the running totals and the knockout cutoff.
 - Games move between phones with QR codes or a JSON file — a one-time handover, never a sync.
 - The game in progress is saved in this browser on this device, so a refresh, a closed tab
   or a browser restart picks up exactly where the table left off.
+- A knockout plays one short music sting; nothing else in the app makes a sound.
 - React 19 + TypeScript + Vite + Tailwind CSS v4, with shadcn-style primitives built on
   Radix UI and Lucide icons.
 
@@ -120,6 +121,23 @@ ignored (they never travel). The security is a six-character code and human care
 prevents accidents, not a determined person. Loading a transfer replaces whatever is on the
 receiving phone, so that confirmation is deliberate.
 
+## Elimination music
+
+One track ships with the app: `public/sounds/BALOR Music - Big B mass Dialogues.mp3`. The
+name is kept exactly as uploaded and the spaces are URL-encoded in the app (`%20`), so the
+browser requests `sounds/BALOR%20Music%20-%20Big%20B%20mass%20Dialogues.mp3`.
+
+- It plays only after a knockout has been **recorded** — by the cutoff or by a table
+  decision on a tie. Setting up a game, starting a round, confirming a round without a
+  knockout, and restoring a saved game are all silent.
+- It plays once per knockout. Going back to the results, revisiting the dashboard or
+  refreshing never replays it, and the effect that triggers it cannot restart a track that
+  is already sounding.
+- The track is started by the tap that confirmed the round, so browsers allow it: there is
+  no permission prompt and no unlock gesture.
+- A missing or undecodable file is detected once and then skipped for the rest of the
+  session. The knockout still lands with its splash, score and reason.
+
 ## The game
 
 ### Setup
@@ -197,12 +215,14 @@ src/
   screens/         Home, Setup, Dashboard, Score Entry, Results, Leaderboard,
                    Tie-break, Decision, Final, Transfer, Import
   hooks/           beforeunload guard, camera QR scanner (jsQR)
-  lib/             characters, ids, formatting
+  lib/             characters, ids, formatting, sound.ts (the knockout sting)
   __tests__/       full user-journey and persistence tests
 ```
 
 ## Notes and limits
 
+- Sound is never required: a muted device, blocked autoplay or a missing file only makes the
+  app quiet. Nothing in the game depends on the sting having played.
 - Saves are per browser profile and per device. Two tabs of the same game are not synced —
   the last write wins — and clearing site data deletes the saved game.
 - QR transfer is a handover, not a sync: the two phones never share state, and the old phone

@@ -20,6 +20,7 @@ import { clearSavedGame, loadSavedGame, saveGame, type LoadResult } from '@/game
 import { resolveScreen, type Screen } from '@/game/selectors'
 import { useBeforeUnload } from '@/hooks/useBeforeUnload'
 import { createId } from '@/lib/id'
+import { playEliminationSound, stopEliminationSound } from '@/lib/sound'
 import type { EliminationRecord, GameState } from '@/game/types'
 import { cn, formatTime } from '@/lib/utils'
 
@@ -109,6 +110,8 @@ export default function App() {
       roundNumber: player.eliminatedAtRound ?? game.rounds.length,
       via: 'cutoff',
     }
+    // The knockout is already recorded in state, so the music is safe to fire.
+    void playEliminationSound()
     setSplash({
       elimination,
       cutoff: game.config.cutoff,
@@ -237,6 +240,7 @@ export default function App() {
     seenEliminations.current = new Set(
       incoming.players.filter((player) => player.eliminated).map((player) => player.id),
     )
+    stopEliminationSound()
     dispatch({ type: 'IMPORT_GAME', game: incoming, at: Date.now() })
     setRestoredAt(null)
     setRestoreError(null)
@@ -251,6 +255,7 @@ export default function App() {
   /** Discards the game in memory *and* the saved copy on this device. */
   function resetGame() {
     setConfirm(null)
+    stopEliminationSound()
     clearSavedGame()
     dispatch({ type: 'RESET_GAME' })
     setRestoredAt(null)
