@@ -3,6 +3,7 @@ import {
   Gavel,
   Info,
   ListOrdered,
+  Lock,
   Play,
   RotateCcw,
   Sparkles,
@@ -270,17 +271,31 @@ export function DashboardScreen({
 
       <StickyActionBar>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[11px] text-faint">
-            {active.length} eligible · cutoff {formatNumber(game.config.cutoff)}
-          </p>
-          <p className="mt-0.5 truncate text-xs font-medium text-ink-soft">
-            {gate.allowed ? 'Deal the next hand to begin.' : gate.reason}
-          </p>
+          {readOnly ? (
+            // The frozen copy has no action to offer, so keep the bar short.
+            <p className="flex items-center gap-1.5 truncate text-xs font-medium text-ink-soft">
+              <Lock className="size-3.5 shrink-0 text-uno-yellow" />
+              Read-only copy
+            </p>
+          ) : (
+            <>
+              <p className="truncate text-[11px] text-faint">
+                {active.length} eligible · cutoff {formatNumber(game.config.cutoff)}
+              </p>
+              <p className="mt-0.5 truncate text-xs font-medium text-ink-soft">
+                {gate.allowed ? 'Deal the next hand to begin.' : gate.reason}
+              </p>
+            </>
+          )}
         </div>
-        <Button variant="secondary" size="lg" onClick={onLeaderboard} className="px-3 sm:px-5">
-          <Trophy className="size-4" />
-          <span className="hidden sm:inline">Leaderboard</span>
-        </Button>
+        {/* On a frozen copy the snapshot button takes this slot; the board stays
+            reachable from the standings link and the game menu. */}
+        {!(readOnly && game.currentRound && onSnapshot) && (
+          <Button variant="secondary" size="lg" onClick={onLeaderboard} className="px-3 sm:px-5">
+            <Trophy className="size-4" />
+            <span className="hidden sm:inline">Leaderboard</span>
+          </Button>
+        )}
         {readOnly && game.currentRound && onSnapshot && (
           <Button
             variant="secondary"
