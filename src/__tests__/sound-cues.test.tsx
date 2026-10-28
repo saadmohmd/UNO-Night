@@ -61,22 +61,16 @@ async function playRound(user: User, winner: string, penalties: Record<string, s
 }
 
 describe('sound cues', () => {
-  it('plays the opening theme once when the app opens', async () => {
-    render(<App />)
-    await screen.findByRole('heading', { name: /track the night/i })
-    await Promise.resolve()
-    expect(played).toEqual(['vembanattu kayal.mp3'])
-  })
-
-  it('stays silent when only opening the setup screen', async () => {
+  it('opens in silence — no sound until the table asks for one', async () => {
     const user = userEvent.setup()
     render(<App />)
     await screen.findByRole('heading', { name: /track the night/i })
+    await Promise.resolve()
+    expect(played).toEqual([])
+
     await user.click(screen.getByRole('button', { name: /new game/i }))
     await screen.findByRole('heading', { name: /set up the table/i })
-
-    // No game has started yet, so only the opening theme has played.
-    expect(played).toEqual(['vembanattu kayal.mp3'])
+    expect(played).toEqual([])
   })
 
   it('plays the new-game cue once the game actually starts', async () => {
@@ -197,14 +191,15 @@ describe('sound cues', () => {
     const saved = window.localStorage.getItem(SAVED_GAME_KEY)
     expect(saved).not.toBeNull()
 
-    // Reload with the same save: an app open, but no new game, round or knockout.
+    // Reload with the same save: no new game, no new round, no new knockout.
     cleanup()
     resetSoundsForTests()
     played = []
     render(<App />)
 
     await screen.findByRole('heading', { name: /round 2/i })
-    expect(played).toEqual(['vembanattu kayal.mp3'])
+    // Reopening is silent: no new game, no round start, no second knockout cue.
+    expect(played).toEqual([])
     expect(screen.queryByTestId('elimination-splash')).not.toBeInTheDocument()
   })
 

@@ -20,7 +20,7 @@ import { clearSavedGame, loadSavedGame, saveGame, type LoadResult } from '@/game
 import { resolveScreen, type Screen } from '@/game/selectors'
 import { useBeforeUnload } from '@/hooks/useBeforeUnload'
 import { createId } from '@/lib/id'
-import { playOpeningSound, playSound } from '@/lib/sound'
+import { playSound } from '@/lib/sound'
 import type { EliminationRecord, GameState } from '@/game/types'
 import { cn, formatTime } from '@/lib/utils'
 
@@ -87,12 +87,6 @@ export default function App() {
     },
     [rawDispatch],
   )
-
-  // The opening cue plays once per app open. Browsers block autoplay until the
-  // first gesture, so the helper retries itself then.
-  useEffect(() => {
-    playOpeningSound()
-  }, [])
 
   useEffect(() => {
     if (!error) return

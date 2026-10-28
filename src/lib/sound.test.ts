@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   SOUND_CUES,
-  playOpeningSound,
   playSound,
   resetSoundsForTests,
   soundPath,
@@ -38,7 +37,6 @@ afterEach(() => {
 
 describe('sound cue files', () => {
   it('points every cue at the uploaded file, spaces URL-encoded', () => {
-    expect(soundPath('opening')).toBe('sounds/vembanattu%20kayal.mp3')
     expect(soundPath('newGame')).toBe('sounds/ethra%20kunnakale.mp3')
     expect(soundPath('beginRound')).toBe('sounds/phone%20vilich%20paranjind.mp3')
     expect(soundPath('elimination')).toBe('sounds/thankan%20njanada.mp3')
@@ -50,6 +48,12 @@ describe('sound cue files', () => {
       // The encoded path resolves to the real file name on disk.
       expect(decodeURIComponent(path.split('/')[1])).toMatch(/^[a-z0-9 ]+\.mp3$/)
     }
+  })
+
+  it('has no cue for opening the app', () => {
+    expect(SOUND_CUES).toEqual(['newGame', 'beginRound', 'elimination'])
+    // The opening track is still on disk, it is simply never requested.
+    expect(SOUND_CUES).not.toContain('opening')
   })
 
   it('resolves relative to whatever path the app is served from', () => {
@@ -97,8 +101,8 @@ describe('playSound', () => {
       return Promise.reject(error)
     })
 
-    await expect(playSound('opening')).resolves.toBe(false)
-    await expect(playSound('opening')).resolves.toBe(false)
+    await expect(playSound('newGame')).resolves.toBe(false)
+    await expect(playSound('newGame')).resolves.toBe(false)
     expect(calls).toBe(1)
   })
 
@@ -133,101 +137,6 @@ describe('playSound', () => {
     delete window.Audio
     await expect(playSound('newGame')).resolves.toBe(false)
     window.Audio = original
-  })
-})
-
-describe('playOpeningSound', () => {
-  it('plays once on open and never again', async () => {
-    const { played } = trackPlayback()
-    playOpeningSound()
-    await Promise.resolve()
-    await Promise.resolve()
-
-    expect(played).toHaveLength(1)
-    expect(played[0]).toContain('vembanattu%20kayal.mp3')
-
-    playOpeningSound()
-    await Promise.resolve()
-    expect(played).toHaveLength(1)
-  })
-
-  it('retries after the browser blocks autoplay, on the first gesture', async () => {
-    let calls = 0
-    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => {
-      calls += 1
-      if (calls === 1) {
-        const error = new Error('blocked') as Error & { name: string }
-        error.name = 'NotAllowedError'
-        return Promise.reject(error)
-      }
-      return Promise.resolve()
-    })
-
-    playOpeningSound()
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(calls).toBe(1)
-
-    // Nothing happened until the user touched the page…
-    expect(play).toHaveBeenCalledTimes(1)
-
-    window.dispatchEvent(new Event('pointerdown'))
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(calls).toBe(2)
-
-    // …and one gesture is enough: it never plays a second time.
-    window.dispatchEvent(new Event('keydown'))
-    window.dispatchEvent(new Event('pointerdown'))
-    await Promise.resolve()
-    expect(calls).toBe(2)
-  })
-
-  it('starts once even when a single tap fires several unlock events', async () => {
-    let calls = 0
-    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => {
-      calls += 1
-      if (calls === 1) {
-        const error = new Error('blocked') as Error & { name: string }
-        error.name = 'NotAllowedError'
-        return Promise.reject(error)
-      }
-      return Promise.resolve()
-    })
-
-    playOpeningSound()
-    await Promise.resolve()
-    await Promise.resolve()
-
-    // One tap: pointerdown, then click.
-    window.dispatchEvent(new Event('pointerdown'))
-    window.dispatchEvent(new Event('click'))
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-
-    expect(calls).toBe(2)
-  })
-
-  it('stops listening when the file is missing', async () => {
-    let calls = 0
-    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => {
-      calls += 1
-      const error = new Error('gone') as Error & { name: string }
-      error.name = 'NotSupportedError'
-      return Promise.reject(error)
-    })
-
-    playOpeningSound()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-
-    window.dispatchEvent(new Event('pointerdown'))
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(calls).toBe(1)
   })
 })
 

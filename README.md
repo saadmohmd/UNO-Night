@@ -9,7 +9,7 @@ points and the app handles the running totals and the knockout cutoff.
 - Games move between phones with QR codes or a JSON file — a one-time handover, never a sync.
 - The game in progress is saved in this browser on this device, so a refresh, a closed tab
   or a browser restart picks up exactly where the table left off.
-- Four short audio cues mark the opening, a new game, a new round and a confirmed knockout.
+- Three short audio cues mark a new game, a new round and a confirmed knockout.
 - React 19 + TypeScript + Vite + Tailwind CSS v4, with shadcn-style primitives built on
   Radix UI and Lucide icons.
 
@@ -124,25 +124,27 @@ receiving phone, so that confirmation is deliberate.
 
 ## Sound cues
 
-Four MP3s live in `public/sounds/` and ship with the static build. The file names are kept
+Three MP3s live in `public/sounds/` and ship with the static build. The file names are kept
 exactly as uploaded; the spaces are URL-encoded in the app (`%20`), so the browser requests
-`sounds/vembanattu%20kayal.mp3` and friends.
+`sounds/ethra%20kunnakale.mp3` and friends.
 
 | Cue | File | Plays when |
 | --- | --- | --- |
-| Opening | `vembanattu kayal.mp3` | Once, when the app opens |
 | New game | `ethra kunnakale.mp3` | A new game actually starts (the setup form is accepted) |
 | Begin round | `phone vilich paranjind.mp3` | A round actually starts |
 | Elimination | `thankan njanada.mp3` | A knockout has been recorded — by the cutoff or by a table decision |
+
+Opening the app is silent on purpose: no cue is requested until the table starts a game or a
+round. `vembanattu kayal.mp3` stays in the folder but is not referenced anywhere, so the
+browser never downloads it.
 
 - Cues follow *committed state*, not button presses: a rejected setup or a refused round
   stays silent. Restoring a saved game, importing a transfer or re-entering a screen never
   replays a cue.
 - One shared channel: starting a cue stops the previous one, and a cue that is already
   sounding ignores duplicate triggers, so nothing overlaps or stutters.
-- Browsers block audio until the page is interacted with. The opening cue is attempted
-  immediately, and if that is refused it is retried on the first tap, key press or scroll —
-  once. Nothing asks for a permission and no dialog appears.
+- Every cue is triggered by a tap, so browsers allow it — there is no autoplay permission
+  prompt, no unlock gesture and no other dialog.
 - A missing or undecodable file is detected once and then skipped for the rest of the
   session: the game itself is untouched and nothing is logged at the user.
 

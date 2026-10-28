@@ -1,5 +1,5 @@
 /**
- * The app's four sound cues.
+ * The app's sound cues.
  *
  * Everything here is best-effort: a missing file, blocked autoplay or a dead
  * audio device must never affect the game. Each cue plays on a single shared
@@ -8,21 +8,22 @@
  *
  * The files live in `public/sounds/` and keep their original names — the spaces
  * are URL-encoded below so the browser requests exactly the uploaded files.
+ *
+ * Opening the app is deliberately silent: every cue fires from a tap, so nothing
+ * is attempted before the table asks for it.
  */
 
-export type SoundCue = 'opening' | 'newGame' | 'beginRound' | 'elimination'
+export type SoundCue = 'newGame' | 'beginRound' | 'elimination'
 
 /** URLs relative to the deployed page, so sub-path hosting keeps working. */
 const SOURCES: Record<SoundCue, string> = {
-  opening: 'sounds/vembanattu%20kayal.mp3',
   newGame: 'sounds/ethra%20kunnakale.mp3',
   beginRound: 'sounds/phone%20vilich%20paranjind.mp3',
   elimination: 'sounds/thankan%20njanada.mp3',
 }
 
-/** Volume per cue: the opening is background colour, the results cues carry. */
+/** Volume per cue: the round cues sit under the knockout sting. */
 const VOLUMES: Record<SoundCue, number> = {
-  opening: 0.55,
   newGame: 0.7,
   beginRound: 0.7,
   elimination: 0.8,
@@ -58,12 +59,6 @@ const unavailable = new Set<SoundCue>()
 let channel: HTMLAudioElement | null = null
 /** The cue actually sounding, so a duplicate trigger cannot restart it. */
 let activeCue: SoundCue | null = null
-/** Opening sound bookkeeping: it may only ever start once. */
-let openingStarted = false
-let openingArmed = false
-/** One unlock attempt at a time: a tap fires pointerdown and click together. */
-let openingAttempting = false
-let unlockCleanup: (() => void) | null = null
 
 function clearChannel(audio: HTMLAudioElement) {
   if (channel !== audio) return
@@ -102,7 +97,7 @@ function elementFor(cue: SoundCue): HTMLAudioElement | null {
 
 /**
  * Starts an element and reports *why* it did not play: a blocked autoplay is
- * recoverable on the next gesture, a decode/network failure is not.
+ * recoverable, a decode/network failure is not.
  */
 function attemptPlay(audio: HTMLAudioElement): Promise<Attempt> {
   try {
@@ -178,81 +173,16 @@ export async function playSound(cue: SoundCue): Promise<boolean> {
   return true
 }
 
-/**
- * The opening sound, once per app open.
- *
- * Browsers block audio until the document has been interacted with, so a blocked
- * attempt is retried on the first tap, key press or touch — and then forgotten.
- */
-export function playOpeningSound(): void {
-  if (openingStarted || openingArmed || !audioSupport()) return
-  openingArmed = true
-
-  const cleanup = () => {
-    unlockCleanup?.()
-    unlockCleanup = null
-  }
-
-  const attempt = () => {
-    if (openingStarted) {
-      cleanup()
-      return
-    }
-    if (openingAttempting) return
-    const audio = elementFor('opening')
-    if (!audio) {
-      cleanup()
-      return
-    }
-    openingAttempting = true
-    void attemptPlay(audio).then((result) => {
-      openingAttempting = false
-      if (result === 'playing') {
-        openingStarted = true
-        activeCue = 'opening'
-        channel = audio
-        cleanup()
-      } else if (result === 'failed') {
-        // Missing or undecodable: stop listening instead of retrying forever.
-        release('opening', audio)
-        cleanup()
-      }
-    })
-  }
-
-  // First try straight away; most browsers refuse this without a gesture.
-  attempt()
-  if (openingStarted) return
-
-  if (typeof window === 'undefined') return
-
-  // pointerdown/keydown cover mouse, pen and keyboard; 'click' also covers
-  // synthetic activation from assistive tech and older browsers.
-  const events = ['pointerdown', 'keydown', 'touchstart', 'click'] as const
-  const unlock = () => attempt()
-  events.forEach((event) => window.addEventListener(event, unlock, { passive: true }))
-  unlockCleanup = () => {
-    events.forEach((event) => window.removeEventListener(event, unlock))
-  }
-  // Nobody interacted: stop listening rather than hold the page hostage.
-  window.setTimeout(cleanup, 30_000)
-}
-
 /** Stops everything currently playing. */
 export function stopSounds(): void {
   stopChannel()
 }
 
-/** Test seam: forget every element, flag and listener. */
+/** Test seam: forget every element and flag. */
 export function resetSoundsForTests(): void {
-  unlockCleanup?.()
-  unlockCleanup = null
   elements.forEach((audio) => stop(audio))
   elements.clear()
   unavailable.clear()
   channel = null
   activeCue = null
-  openingStarted = false
-  openingArmed = false
-  openingAttempting = false
 }
