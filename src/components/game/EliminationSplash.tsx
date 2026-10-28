@@ -100,8 +100,13 @@ export function EliminationSplash({
                 aria-hidden="true"
                 className="animate-elim-ring-late absolute inset-0 rounded-full border border-uno-red/35"
               />
-              <span className="animate-elim-avatar relative flex size-20 items-center justify-center rounded-full border border-uno-red/35 bg-bg-soft">
-                <PlayerAvatar name={elimination.playerName} index={accentIndex} size="lg" />
+              <span className="animate-elim-avatar relative flex items-center justify-center">
+                <PlayerAvatar
+                  name={elimination.playerName}
+                  index={accentIndex}
+                  size="lg"
+                  className="size-[76px] shadow-[0_10px_30px_-12px_rgba(0,0,0,0.8)] ring-1 ring-white/15"
+                />
               </span>
             </div>
 

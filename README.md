@@ -165,6 +165,9 @@ knocked out **only if** that score is greater than or equal to the cutoff.
   tie-break screen where the table can either play a sudden-death replay (lowest hand
   penalty survives, cumulative totals unchanged) or record a manual decision.
 - Eliminated players stay on the leaderboard and in the round history, marked `Out`.
+- Every player gets a drawn character (pastel tile, face, hair) instead of initials. It is
+  generated from the name and the seat in `src/lib/character.ts`, so it is stable for the
+  whole game, unique per seat at a table of up to seven, and needs no images or network.
 - A knockout is animated: a splash lands over whatever screen is showing with the player's
   avatar, rings, a struck-through name and an `OUT` stamp, then clears itself after a few
   seconds (or on tap / Escape / Enter). It plays once per knockout — never again when you
