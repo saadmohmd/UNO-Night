@@ -20,7 +20,6 @@ import { clearSavedGame, loadSavedGame, saveGame, type LoadResult } from '@/game
 import { resolveScreen, type Screen } from '@/game/selectors'
 import { useBeforeUnload } from '@/hooks/useBeforeUnload'
 import { createId } from '@/lib/id'
-import { playSound } from '@/lib/sound'
 import type { EliminationRecord, GameState } from '@/game/types'
 import { cn, formatTime } from '@/lib/utils'
 
@@ -57,14 +56,6 @@ export default function App() {
     cutoff: number
     accentIndex: number
   } | null>(null)
-  /**
-   * What the cues have already announced. Seeded from the restored game so that
-   * reopening the app never fires the "new game" or "round started" sounds.
-   */
-  const announced = useRef<{ startedAt: number | null; roundId: string | null }>({
-    startedAt: boot.status === 'restored' ? boot.game.startedAt : null,
-    roundId: boot.status === 'restored' ? (boot.game.currentRound?.id ?? null) : null,
-  })
   const [restoreError, setRestoreError] = useState<string | null>(
     boot.status === 'discarded' ? boot.reason : null,
   )
@@ -94,26 +85,6 @@ export default function App() {
     return () => window.clearTimeout(timer)
   }, [error, rawDispatch])
 
-  // Sounds follow *committed* state, never button presses: a cue only fires once
-  // the reducer has actually started the game or the round.
-  useEffect(() => {
-    const cursor = announced.current
-
-    if (game.phase === 'active' && game.startedAt !== null && game.startedAt !== cursor.startedAt) {
-      cursor.startedAt = game.startedAt
-      void playSound('newGame')
-    } else if (game.startedAt !== cursor.startedAt) {
-      cursor.startedAt = game.startedAt
-    }
-
-    const roundId = game.currentRound?.kind === 'round' ? game.currentRound.id : null
-    if (roundId !== cursor.roundId) {
-      cursor.roundId = roundId
-      // A tie-break hand is not a new round, so it stays silent.
-      if (roundId !== null) void playSound('beginRound')
-    }
-  }, [game.phase, game.startedAt, game.currentRound])
-
   // A knockout earns a splash exactly once, on whichever screen is showing.
   useEffect(() => {
     const fresh = game.players.filter(
@@ -138,8 +109,6 @@ export default function App() {
       roundNumber: player.eliminatedAtRound ?? game.rounds.length,
       via: 'cutoff',
     }
-    // The elimination is already recorded in state, so the cue is safe to fire.
-    void playSound('elimination')
     setSplash({
       elimination,
       cutoff: game.config.cutoff,
@@ -268,11 +237,6 @@ export default function App() {
     seenEliminations.current = new Set(
       incoming.players.filter((player) => player.eliminated).map((player) => player.id),
     )
-    // Nor is it a new game or a new round: silence those cues.
-    announced.current = {
-      startedAt: incoming.startedAt,
-      roundId: incoming.currentRound?.id ?? null,
-    }
     dispatch({ type: 'IMPORT_GAME', game: incoming, at: Date.now() })
     setRestoredAt(null)
     setRestoreError(null)

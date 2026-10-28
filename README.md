@@ -4,12 +4,10 @@ A single-device companion app for physical UNO games. One phone, tablet or lapto
 on the table; after each round the table picks the winner, types in each player's penalty
 points and the app handles the running totals and the knockout cutoff.
 
-- 100% client-side. No backend, no accounts, no database, no network calls after load
-  (the four sound files are bundled with the app).
+- 100% client-side. No backend, no accounts, no database, no network calls after load.
 - Games move between phones with QR codes or a JSON file — a one-time handover, never a sync.
 - The game in progress is saved in this browser on this device, so a refresh, a closed tab
   or a browser restart picks up exactly where the table left off.
-- Three short audio cues mark a new game, a new round and a confirmed knockout.
 - React 19 + TypeScript + Vite + Tailwind CSS v4, with shadcn-style primitives built on
   Radix UI and Lucide icons.
 
@@ -122,32 +120,6 @@ ignored (they never travel). The security is a six-character code and human care
 prevents accidents, not a determined person. Loading a transfer replaces whatever is on the
 receiving phone, so that confirmation is deliberate.
 
-## Sound cues
-
-Three MP3s live in `public/sounds/` and ship with the static build. The file names are kept
-exactly as uploaded; the spaces are URL-encoded in the app (`%20`), so the browser requests
-`sounds/ethra%20kunnakale.mp3` and friends.
-
-| Cue | File | Plays when |
-| --- | --- | --- |
-| New game | `ethra kunnakale.mp3` | A new game actually starts (the setup form is accepted) |
-| Begin round | `phone vilich paranjind.mp3` | A round actually starts |
-| Elimination | `thankan njanada.mp3` | A knockout has been recorded — by the cutoff or by a table decision |
-
-Opening the app is silent on purpose: no cue is requested until the table starts a game or a
-round. `vembanattu kayal.mp3` stays in the folder but is not referenced anywhere, so the
-browser never downloads it.
-
-- Cues follow *committed state*, not button presses: a rejected setup or a refused round
-  stays silent. Restoring a saved game, importing a transfer or re-entering a screen never
-  replays a cue.
-- One shared channel: starting a cue stops the previous one, and a cue that is already
-  sounding ignores duplicate triggers, so nothing overlaps or stutters.
-- Every cue is triggered by a tap, so browsers allow it — there is no autoplay permission
-  prompt, no unlock gesture and no other dialog.
-- A missing or undecodable file is detected once and then skipped for the rest of the
-  session: the game itself is untouched and nothing is logged at the user.
-
 ## The game
 
 ### Setup
@@ -225,14 +197,12 @@ src/
   screens/         Home, Setup, Dashboard, Score Entry, Results, Leaderboard,
                    Tie-break, Decision, Final, Transfer, Import
   hooks/           beforeunload guard, camera QR scanner (jsQR)
-  lib/             characters, ids, formatting, and sound.ts (the four cues)
+  lib/             characters, ids, formatting
   __tests__/       full user-journey and persistence tests
 ```
 
 ## Notes and limits
 
-- Sound is never required: blocked autoplay, a muted device or a missing file only makes the
-  app quiet. Nothing in the game depends on a cue having played.
 - Saves are per browser profile and per device. Two tabs of the same game are not synced —
   the last write wins — and clearing site data deletes the saved game.
 - QR transfer is a handover, not a sync: the two phones never share state, and the old phone

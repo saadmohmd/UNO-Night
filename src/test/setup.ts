@@ -24,14 +24,6 @@ if (!window.ResizeObserver) {
 }
 window.scrollTo = vi.fn() as unknown as typeof window.scrollTo
 
-// jsdom has no media stack: play()/pause() would only log "Not implemented".
-// Sound behaviour is asserted in sound.test.tsx, which stubs these itself.
-HTMLMediaElement.prototype.play = function play() {
-  return Promise.resolve()
-}
-HTMLMediaElement.prototype.pause = function pause() {}
-HTMLMediaElement.prototype.load = function load() {}
-
 afterEach(() => {
   cleanup()
   // Saved games must never leak between tests.

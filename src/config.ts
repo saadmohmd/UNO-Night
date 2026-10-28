@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.7.0'
+export const APP_VERSION = '1.8.0'
 
 export const APP_NAME = 'UNO Night'
 export const APP_TAGLINE = 'Score Tracker'
