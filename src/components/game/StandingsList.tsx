@@ -47,6 +47,9 @@ export function StandingsList({
             key={player.id}
             className={cn(
               'rounded-2xl border bg-surface/60 px-4 py-3',
+              // An eliminated row slides in and stays muted, so a fresh
+              // knockout reads even when the splash has been dismissed.
+              player.eliminated && 'animate-strike',
               isChampion
                 ? 'border-brand/45 bg-brand/[0.06]'
                 : player.eliminated
@@ -73,7 +76,7 @@ export function StandingsList({
                   <span
                     className={cn(
                       'truncate text-[15px] font-medium',
-                      player.eliminated ? 'text-muted' : 'text-ink',
+                      player.eliminated ? 'strike-name text-muted' : 'text-ink',
                     )}
                   >
                     {player.name}
@@ -90,7 +93,9 @@ export function StandingsList({
                     </Badge>
                   )}
                   {player.eliminated && (
-                    <Badge variant="red">Out · R{player.eliminatedAtRound ?? '—'}</Badge>
+                    <Badge variant="red" className="animate-pop">
+                      Out · R{player.eliminatedAtRound ?? '—'}
+                    </Badge>
                   )}
                   {!player.eliminated && atCutoff && (
                     <Badge variant="yellow">At the line</Badge>

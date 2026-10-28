@@ -101,20 +101,28 @@ export function RoundResultsScreen({
         {round.eliminations.map((elimination) => (
           <div
             key={elimination.playerId}
-            className="mt-5 flex animate-strike items-center gap-3 rounded-2xl border border-uno-red/25 bg-uno-red/[0.06] px-4 py-3.5"
+            data-testid="elimination-card"
+            className="relative mt-5 flex animate-strike items-center gap-3 overflow-hidden rounded-2xl border border-uno-red/30 bg-uno-red/[0.07] px-4 py-3.5"
           >
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-uno-red/25 bg-uno-red/10">
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-uno-red/70"
+            />
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-uno-red/30 bg-uno-red/12">
               <UserMinus className="size-4 text-uno-red" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-ink">
-                {elimination.playerName} is out
+              <p className="flex flex-wrap items-baseline gap-1.5 text-sm font-medium text-ink">
+                <span className="strike-name">{elimination.playerName}</span>
+                <span className="text-[10px] font-semibold tracking-[0.18em] text-uno-red uppercase">
+                  out
+                </span>
               </p>
               <p className="text-[11px] leading-relaxed text-muted">
                 {elimination.via === 'cutoff' && (
                   <>
-                    {formatNumber(elimination.cumulativeScore)} points reaches the{' '}
-                    {formatNumber(cutoff)} cutoff.
+                    {formatNumber(elimination.cumulativeScore)} points is past the{' '}
+                    {formatNumber(cutoff)}-point cutoff.
                   </>
                 )}
                 {elimination.via === 'tie-break-replay' && 'Lost the tie-break replay at the cutoff.'}

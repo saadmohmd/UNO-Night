@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { AlertCircle, History, TriangleAlert, X } from 'lucide-react'
 import { HomeScreen } from '@/screens/HomeScreen'
 import { SetupScreen, type SetupDetails } from '@/screens/SetupScreen'
 import { DashboardScreen } from '@/screens/DashboardScreen'
 import { ScoreEntryScreen } from '@/screens/ScoreEntryScreen'
+import { EliminationSplash } from '@/components/game/EliminationSplash'
 import { RoundResultsScreen } from '@/screens/RoundResultsScreen'
 import { LeaderboardScreen } from '@/screens/LeaderboardScreen'
 import { TieBreakScreen } from '@/screens/TieBreakScreen'
@@ -19,7 +20,7 @@ import { clearSavedGame, loadSavedGame, saveGame, type LoadResult } from '@/game
 import { resolveScreen, type Screen } from '@/game/selectors'
 import { useBeforeUnload } from '@/hooks/useBeforeUnload'
 import { createId } from '@/lib/id'
-import type { GameState } from '@/game/types'
+import type { EliminationRecord, GameState } from '@/game/types'
 import { cn, formatTime } from '@/lib/utils'
 
 /** Reads this device's saved game once, before the first render. */
@@ -40,6 +41,21 @@ export default function App() {
   const [restoredAt, setRestoredAt] = useState<number | null>(
     boot.status === 'restored' ? boot.savedAt : null,
   )
+  /**
+   * Players knocked out in this session, remembered across screens. Anything
+   * already out when the app opens (a restored or imported game) is seeded here
+   * so the knockout splash only ever plays for a knockout that just happened.
+   */
+  const seenEliminations = useRef<Set<string>>(
+    new Set(
+      boot.status === 'restored' ? boot.game.players.filter((player) => player.eliminated).map((player) => player.id) : [],
+    ),
+  )
+  const [splash, setSplash] = useState<{
+    elimination: EliminationRecord
+    cutoff: number
+    accentIndex: number
+  } | null>(null)
   const [restoreError, setRestoreError] = useState<string | null>(
     boot.status === 'discarded' ? boot.reason : null,
   )
@@ -68,6 +84,37 @@ export default function App() {
     const timer = window.setTimeout(() => rawDispatch({ type: 'DISMISS_ERROR' }), 6000)
     return () => window.clearTimeout(timer)
   }, [error, rawDispatch])
+
+  // A knockout earns a splash exactly once, on whichever screen is showing.
+  useEffect(() => {
+    const fresh = game.players.filter(
+      (player) => player.eliminated && !seenEliminations.current.has(player.id),
+    )
+    // Remember every eliminated player, including ones restored from a save.
+    seenEliminations.current = new Set(
+      game.players.filter((player) => player.eliminated).map((player) => player.id),
+    )
+    if (fresh.length === 0 || !game.config) return
+    // Only the highest score is ever knocked out in a round, so take the last.
+    const player = fresh[fresh.length - 1]
+    const record = game.rounds
+      .flatMap((round) => round.eliminations)
+      .filter((elimination) => elimination.playerId === player.id)
+      .pop()
+    const elimination: EliminationRecord = record ?? {
+      playerId: player.id,
+      playerName: player.name,
+      cumulativeScore: player.cumulativeScore,
+      order: player.eliminationOrder ?? 1,
+      roundNumber: player.eliminatedAtRound ?? game.rounds.length,
+      via: 'cutoff',
+    }
+    setSplash({
+      elimination,
+      cutoff: game.config.cutoff,
+      accentIndex: game.players.findIndex((entry) => entry.id === player.id),
+    })
+  }, [game.players, game.rounds, game.config])
 
   // A rejected save is deleted once, after mount — never while reading it.
   useEffect(() => {
@@ -186,6 +233,10 @@ export default function App() {
 
   /** Replaces this device's game with a validated transfer. */
   function importGame(incoming: GameState) {
+    // The imported history is not "news" — mark its knockouts as already seen.
+    seenEliminations.current = new Set(
+      incoming.players.filter((player) => player.eliminated).map((player) => player.id),
+    )
     dispatch({ type: 'IMPORT_GAME', game: incoming, at: Date.now() })
     setRestoredAt(null)
     setRestoreError(null)
@@ -262,6 +313,15 @@ export default function App() {
 
   return (
     <div className="relative min-h-dvh">
+      {splash && (
+        <EliminationSplash
+          elimination={splash.elimination}
+          cutoff={splash.cutoff}
+          accentIndex={splash.accentIndex}
+          onDismiss={() => setSplash(null)}
+        />
+      )}
+
       <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
         <div className="accent-line fixed inset-x-0 top-0 h-px opacity-70" />
         <div className="absolute inset-0 bg-[radial-gradient(75%_55%_at_50%_-10%,rgba(89,160,255,0.09),transparent_70%),radial-gradient(45%_40%_at_100%_100%,rgba(255,95,99,0.05),transparent_70%)]" />

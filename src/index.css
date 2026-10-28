@@ -31,6 +31,137 @@
   --animate-pop: pop 0.24s cubic-bezier(0.34, 1.56, 0.64, 1) both;
   --animate-sheen: sheen 2.6s ease-in-out infinite;
   --animate-strike: strike 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+
+  /* Elimination choreography: the splash, then the smaller beats. */
+  --animate-elim-slam: elim-slam 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-elim-avatar: elim-avatar 0.62s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  --animate-elim-ring: elim-ring 1.15s 0.1s ease-out both;
+  --animate-elim-ring-late: elim-ring 1.15s 0.32s ease-out both;
+  --animate-elim-glow: elim-glow 1.6s ease-out both;
+  --animate-elim-stamp: elim-stamp 0.58s 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-elim-strike: elim-strike 0.62s 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-elim-rise: elim-rise 0.46s 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-elim-shake: elim-shake 0.46s 0.18s ease-in-out both;
+}
+
+@keyframes elim-slam {
+  0% {
+    opacity: 0;
+    transform: translateY(26px) scale(0.9);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1.015);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes elim-avatar {
+  0% {
+    opacity: 0;
+    transform: scale(0.35) rotate(-16deg);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.14) rotate(4deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes elim-ring {
+  0% {
+    opacity: 0.6;
+    transform: scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.15);
+  }
+}
+
+@keyframes elim-glow {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  40% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0.3;
+    transform: scale(1.7);
+  }
+}
+
+@keyframes elim-stamp {
+  0% {
+    opacity: 0;
+    transform: scale(2.6) rotate(-20deg);
+    filter: blur(7px);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(0.94) rotate(-9deg);
+    filter: blur(0);
+  }
+  78% {
+    transform: scale(1.05) rotate(-7deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(-8deg);
+    filter: blur(0);
+  }
+}
+
+@keyframes elim-strike {
+  0% {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes elim-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes elim-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  18% {
+    transform: translateX(-7px);
+  }
+  36% {
+    transform: translateX(6px);
+  }
+  54% {
+    transform: translateX(-4px);
+  }
+  72% {
+    transform: translateX(3px);
+  }
+  88% {
+    transform: translateX(-1px);
+  }
 }
 
 @keyframes fade-in {
@@ -153,6 +284,7 @@
     *::before,
     *::after {
       animation-duration: 0.001ms !important;
+      animation-delay: 0ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.001ms !important;
       scroll-behavior: auto !important;
@@ -173,6 +305,25 @@
   scrollbar-width: none;
   &::-webkit-scrollbar {
     display: none;
+  }
+}
+
+/**
+ * Draws a line through an eliminated player's name. The line grows from the
+ * left, so it reads as a strike rather than a permanent style.
+ */
+@utility strike-name {
+  position: relative;
+  &::after {
+    content: '';
+    position: absolute;
+    inset-inline: -1px;
+    top: 52%;
+    height: 1.5px;
+    border-radius: 999px;
+    background: currentColor;
+    transform-origin: left center;
+    animation: elim-strike 0.55s 0.1s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 }
 

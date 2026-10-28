@@ -165,6 +165,12 @@ knocked out **only if** that score is greater than or equal to the cutoff.
   tie-break screen where the table can either play a sudden-death replay (lowest hand
   penalty survives, cumulative totals unchanged) or record a manual decision.
 - Eliminated players stay on the leaderboard and in the round history, marked `Out`.
+- A knockout is animated: a splash lands over whatever screen is showing with the player's
+  avatar, rings, a struck-through name and an `OUT` stamp, then clears itself after a few
+  seconds (or on tap / Escape / Enter). It plays once per knockout — never again when you
+  go back to the results or reopen the game — and the standings strike the name through.
+  `prefers-reduced-motion` collapses every animation to nothing; the score, the cutoff and
+  the reason are always on screen as text, so nothing is conveyed by motion alone.
 - When only two players remain, a controller decision screen asks the table to either
   opt into two-player rounds or end the game. The 3-player minimum is never silently broken.
 - Ends are honest: a unique lowest eligible score is a champion, a tie is an unresolved
